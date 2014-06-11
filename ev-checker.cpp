@@ -7,6 +7,7 @@
 
 #include "EVCheckerTrustDomain.h"
 #include "nss.h"
+#include "plgetopt.h"
 #include "prerror.h"
 
 void
@@ -23,7 +24,8 @@ PrintPRError(const char* message)
 void
 PrintUsage(const char* argv0)
 {
-  std::cerr << "Usage: " << argv0 << " <end-entity certificate>" << std::endl;
+  std::cerr << "Usage: " << argv0 << " <-e end-entity certificate>";
+  std::cerr << " <-r root certificate>" << std::endl;
 }
 
 inline void
@@ -71,14 +73,41 @@ ReadCertFromFile(const char* filename)
   return cert;
 }
 
+typedef mozilla::pkix::ScopedPtr<PLOptState, PL_DestroyOptState> ScopedPLOptState;
+
 int main(int argc, char* argv[]) {
-  if (argc != 2) {
+  if (argc < 5) {
     PrintUsage(argv[0]);
     return 1;
   }
   if (NSS_NoDB_Init(nullptr) != SECSuccess) {
     PrintPRError("NSS_NoDB_Init failed");
   }
-  mozilla::pkix::ScopedCERTCertificate cert(ReadCertFromFile(argv[1]));
+  const char* endEntityFileName = nullptr;
+  const char* rootFileName = nullptr;
+  ScopedPLOptState opt(PL_CreateOptState(argc, argv, "e:r:"));
+  PLOptStatus os;
+  while ((os = PL_GetNextOpt(opt.get())) != PL_OPT_EOL) {
+    if (os == PL_OPT_BAD) {
+      continue;
+    }
+    switch (opt->option) {
+      case 'e':
+        endEntityFileName = opt->value;
+        break;
+      case 'r':
+        rootFileName = opt->value;
+        break;
+      default:
+        PrintUsage(argv[0]);
+        return 1;
+    }
+  }
+  if (!endEntityFileName || !rootFileName) {
+    PrintUsage(argv[0]);
+    return 1;
+  }
+  mozilla::pkix::ScopedCERTCertificate cert(ReadCertFromFile(endEntityFileName));
+  mozilla::pkix::ScopedCERTCertificate root(ReadCertFromFile(rootFileName));
   return 0;
 }

@@ -11,7 +11,7 @@
 class EVCheckerTrustDomain : public mozilla::pkix::TrustDomain
 {
 public:
-  EVCheckerTrustDomain();
+  explicit EVCheckerTrustDomain(CERTCertificate* root);
 
   virtual SECStatus GetCertTrust(mozilla::pkix::EndEntityOrCA endEntityOrCA,
                                  const mozilla::pkix::CertPolicyId& policy,
@@ -37,6 +37,9 @@ public:
                        /*optional*/ const SECItem* stapledOCSPresponse);
 
   virtual SECStatus IsChainValid(const CERTCertList* certChain);
+
+private:
+  mozilla::pkix::ScopedCERTCertificate mRoot;
 };
 
 #endif // EVCheckerTrustDomain_h

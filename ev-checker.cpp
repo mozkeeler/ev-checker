@@ -3,10 +3,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 
 #include "EVCheckerTrustDomain.h"
 #include "nss.h"
+#include "hasht.h"
+#include "pk11pub.h"
 #include "plbase64.h"
 #include "plgetopt.h"
 #include "prerror.h"
@@ -131,7 +134,116 @@ ReadCertFromFile(const char* filename)
   return cert;
 }
 
-typedef mozilla::pkix::ScopedPtr<PLOptState, PL_DestroyOptState> ScopedPLOptState;
+void
+PK11_DestroyContext_true(PK11Context* context)
+{
+  PK11_DestroyContext(context, true);
+}
+
+typedef mozilla::pkix::ScopedPtr<PK11Context, PK11_DestroyContext_true>
+  ScopedPK11Context;
+typedef uint8_t SHA256Buffer[SHA256_LENGTH];
+
+SECStatus
+HashBytes(SHA256Buffer& output, const SECItem& data)
+{
+  ScopedPK11Context context(PK11_CreateDigestContext(SEC_OID_SHA256));
+  if (!context) {
+    PrintPRError("PK11_CreateDigestContext failed");
+    return SECFailure;
+  }
+  if (PK11_DigestBegin(context.get()) != SECSuccess) {
+    PrintPRError("PK11_DigestBegin failed");
+    return SECFailure;
+  }
+  if (PK11_DigestOp(context.get(), data.data, data.len) != SECSuccess) {
+    PrintPRError("PK11_DigestOp failed");
+    return SECFailure;
+  }
+  uint32_t outLen = 0;
+  if (PK11_DigestFinal(context.get(), output, &outLen, SHA256_LENGTH)
+        != SECSuccess) {
+    PrintPRError("PK11_DigestFinal failed");
+    return SECFailure;
+  }
+  if (outLen != SHA256_LENGTH) {
+    return SECFailure;
+  }
+  return SECSuccess;
+}
+
+std::ostream&
+HexPrint(std::ostream& output)
+{
+  output.fill('0');
+  return output << "0x" << std::hex << std::uppercase << std::setw(2);
+}
+
+void
+PrintSHA256HashOf(const SECItem& data)
+{
+  SHA256Buffer hash;
+  if (HashBytes(hash, data) != SECSuccess) {
+    return;
+  }
+  // The format is:
+  // '{ <11 hex bytes>
+  //    <11 hex bytes>
+  //    <10 hex bytes> },'
+  std::cout << "{ ";
+  for (size_t i = 0; i < 11; i++) {
+    uint32_t val = hash[i];
+    std::cout << HexPrint << val << ", ";
+  }
+  std::cout << std::endl << "  ";
+  for (size_t i = 11; i < 22; i++) {
+    uint32_t val = hash[i];
+    std::cout << HexPrint << val << ", ";
+  }
+  std::cout << std::endl << "  ";
+  for (size_t i = 22; i < 31; i++) {
+    uint32_t val = hash[i];
+    std::cout << HexPrint << val << ", ";
+  }
+  uint32_t val = hash[31];
+  std::cout << HexPrint << val << " }," << std::endl;
+}
+
+void
+PORT_Free_string(char* str)
+{
+  PORT_Free(str);
+}
+
+typedef mozilla::pkix::ScopedPtr<char, PORT_Free_string> ScopedString;
+
+void
+PrintBase64Of(const SECItem& data)
+{
+  ScopedString base64(PL_Base64Encode(reinterpret_cast<const char*>(data.data),
+                                      data.len, nullptr));
+  if (!base64) {
+    return;
+  }
+  // The format is:
+  // '"<base64>"
+  //  "<base64>",'
+  // where each line is limited to 64 characters of base64 data.
+  size_t lines = strlen(base64.get()) / 64;
+  for (size_t line = 0; line < lines; line++) {
+    ScopedString lineStr(reinterpret_cast<char*>(PORT_Alloc(65)));
+    PL_strncpyz(lineStr.get(), base64.get() + 64 * line, 65);
+    std::cout << "\"" << lineStr.get() << "\"" << std::endl;
+  }
+  size_t remainder = strlen(base64.get()) % 64;
+  ScopedString remainderStr(reinterpret_cast<char*>(PORT_Alloc(remainder + 1)));
+  PL_strncpyz(remainderStr.get(),
+              base64.get() + strlen(base64.get()) - remainder, remainder + 1);
+  std::cout << "\"" << remainderStr.get() << "\"," << std::endl;
+}
+
+typedef mozilla::pkix::ScopedPtr<PLOptState, PL_DestroyOptState>
+  ScopedPLOptState;
 
 int main(int argc, char* argv[]) {
   if (argc < 5) {
@@ -143,7 +255,9 @@ int main(int argc, char* argv[]) {
   }
   const char* endEntityFileName = nullptr;
   const char* rootFileName = nullptr;
-  ScopedPLOptState opt(PL_CreateOptState(argc, argv, "e:r:"));
+  const char* dottedOid = nullptr;
+  const char* oidDescription = nullptr;
+  ScopedPLOptState opt(PL_CreateOptState(argc, argv, "e:r:o:d:"));
   PLOptStatus os;
   while ((os = PL_GetNextOpt(opt.get())) != PL_OPT_EOL) {
     if (os == PL_OPT_BAD) {
@@ -156,6 +270,12 @@ int main(int argc, char* argv[]) {
       case 'r':
         rootFileName = opt->value;
         break;
+      case 'o':
+        dottedOid = opt->value;
+        break;
+      case 'd':
+        oidDescription = opt->value;
+        break;
       default:
         PrintUsage(argv[0]);
         return 1;
@@ -165,15 +285,27 @@ int main(int argc, char* argv[]) {
     PrintUsage(argv[0]);
     return 1;
   }
-  EVCheckerTrustDomain trustDomain(ReadCertFromFile(rootFileName));
-  mozilla::pkix::ScopedCERTCertificate cert(ReadCertFromFile(endEntityFileName));
+
+  mozilla::pkix::ScopedCERTCertificate root(ReadCertFromFile(rootFileName));
+  std::cout << "// " << root->issuerName << std::endl;
+  std::cout << (dottedOid ? dottedOid : "policy.OID.goes.here")
+            << "," << std::endl;
+  std::cout << "\"" << (oidDescription
+                        ? oidDescription
+                        : "OID Description goes here")
+            << "\"," << std::endl;
+  std::cout << "SEC_OID_UNKNOWN," << std::endl;
+  PrintSHA256HashOf(root->derCert);
+  PrintBase64Of(root->derIssuer);
+  PrintBase64Of(root->serialNumber);
+  EVCheckerTrustDomain trustDomain(CERT_DupCertificate(root.get()));
+  mozilla::pkix::ScopedCERTCertificate cert(
+    ReadCertFromFile(endEntityFileName));
   mozilla::pkix::ScopedCERTCertList results;
   SECStatus rv = BuildCertChain(trustDomain, cert.get(), PR_Now(),
-                                mozilla::pkix::EndEntityOrCA::MustBeEndEntity,
-                                0,
-                                mozilla::pkix::KeyPurposeId::anyExtendedKeyUsage,
-                                mozilla::pkix::CertPolicyId::anyPolicy, nullptr,
-                                results);
+                   mozilla::pkix::EndEntityOrCA::MustBeEndEntity, 0,
+                   mozilla::pkix::KeyPurposeId::anyExtendedKeyUsage,
+                   mozilla::pkix::CertPolicyId::anyPolicy, nullptr, results);
   if (rv != SECSuccess) {
     PrintPRError("BuildCertChain failed");
     return 1;

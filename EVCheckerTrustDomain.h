@@ -13,6 +13,11 @@ class EVCheckerTrustDomain : public mozilla::pkix::TrustDomain
 public:
   explicit EVCheckerTrustDomain(CERTCertificate* root);
 
+  SECStatus Init(const char* dottedEVPolicyOID, const char* evPolicyName);
+
+  SECStatus GetFirstEVPolicyForCert(const CERTCertificate* cert,
+                     /*out*/ mozilla::pkix::CertPolicyId& policy);
+
   virtual SECStatus GetCertTrust(mozilla::pkix::EndEntityOrCA endEntityOrCA,
                                  const mozilla::pkix::CertPolicyId& policy,
                                  const SECItem& candidateCertDER,
@@ -40,6 +45,7 @@ public:
 
 private:
   mozilla::pkix::ScopedCERTCertificate mRoot;
+  SECOidTag mEVPolicyOIDTag;
 };
 
 #endif // EVCheckerTrustDomain_h

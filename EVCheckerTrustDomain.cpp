@@ -3,12 +3,90 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "EVCheckerTrustDomain.h"
+#include "Util.h"
+#include "prerror.h"
+#include "secerr.h"
 
 using namespace mozilla::pkix;
 
 EVCheckerTrustDomain::EVCheckerTrustDomain(CERTCertificate* root)
  : mRoot(root)
 {
+}
+
+typedef mozilla::pkix::ScopedPtr<CERTCertificatePolicies,
+                                 CERT_DestroyCertificatePoliciesExtension>
+                                 ScopedCERTCertificatePolicies;
+// Largely informed by
+// <mozilla-central>/security/certverifier/ExtendedValidation.cpp
+SECStatus
+EVCheckerTrustDomain::GetFirstEVPolicyForCert(const CERTCertificate* cert,
+  /*out*/ mozilla::pkix::CertPolicyId& policy)
+{
+  if (!cert->extensions) {
+    PR_SetError(SEC_ERROR_EXTENSION_NOT_FOUND, 0);
+    return SECFailure;
+  }
+
+  for (size_t i = 0; cert->extensions[i]; i++) {
+    const SECItem* oid = &cert->extensions[i]->id;
+    SECOidTag oidTag = SECOID_FindOIDTag(oid);
+    if (oidTag != SEC_OID_X509_CERTIFICATE_POLICIES) {
+      continue;
+    }
+    const SECItem* value = &cert->extensions[i]->value;
+    ScopedCERTCertificatePolicies policies(
+      CERT_DecodeCertificatePoliciesExtension(value));
+    if (!policies) {
+      continue;
+    }
+    for (CERTPolicyInfo** policyInfos = policies->policyInfos;
+         *policyInfos; policyInfos++) {
+      const CERTPolicyInfo* policyInfo = *policyInfos;
+      SECOidTag oidTag = policyInfo->oid;
+      if (oidTag == mEVPolicyOIDTag) {
+        const SECOidData* oidData = SECOID_FindOIDByTag(oidTag);
+        if (oidData && oidData->oid.data && oidData->oid.len > 0 &&
+            oidData->oid.len <= mozilla::pkix::CertPolicyId::MAX_BYTES) {
+          policy.numBytes = static_cast<uint16_t>(oidData->oid.len);
+          memcpy(policy.bytes, oidData->oid.data, policy.numBytes);
+          return SECSuccess;
+        }
+      }
+    }
+
+  }
+
+  PR_SetError(SEC_ERROR_EXTENSION_NOT_FOUND, 0);
+  return SECFailure;
+}
+
+
+SECStatus
+EVCheckerTrustDomain::Init(const char* dottedEVPolicyOID,
+                           const char* evPolicyName)
+{
+  SECItem evOIDItem = { siBuffer, 0, 0 };
+  if (SEC_StringToOID(nullptr, &evOIDItem, dottedEVPolicyOID, 0)
+        != SECSuccess) {
+    PrintPRError("SEC_StringToOID failed");
+    return SECFailure;
+  }
+  SECOidData oidData;
+  oidData.oid.len = evOIDItem.len;
+  oidData.oid.data = evOIDItem.data;
+  oidData.offset = SEC_OID_UNKNOWN;
+  oidData.desc = evPolicyName;
+  oidData.mechanism = CKM_INVALID_MECHANISM;
+  oidData.supportedExtension = INVALID_CERT_EXTENSION;
+  mEVPolicyOIDTag = SECOID_AddEntry(&oidData);
+  PORT_Free(evOIDItem.data);
+
+  if (mEVPolicyOIDTag == SEC_OID_UNKNOWN) {
+    PR_SetError(SEC_ERROR_INVALID_ARGS, 0);
+    return SECFailure;
+  }
+  return SECSuccess;
 }
 
 SECStatus

@@ -8,7 +8,8 @@ LDFLAGS=-lnss3 -lnssutil3 -lnspr4 -lplc4
 SOURCES=pkix/lib/pkixbind.cpp pkix/lib/pkixbuild.cpp pkix/lib/pkixcheck.cpp \
         pkix/lib/pkixder.cpp pkix/lib/pkixkey.cpp pkix/lib/pkixocsp.cpp \
 				ev-checker.cpp \
-				EVCheckerTrustDomain.cpp
+				EVCheckerTrustDomain.cpp \
+				Util.cpp
 OBJECTS=$(SOURCES:.cpp=.o)
 EXECUTABLE=ev-checker
 

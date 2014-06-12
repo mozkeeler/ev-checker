@@ -134,14 +134,6 @@ ReadCertFromFile(const char* filename)
   return cert;
 }
 
-void
-PK11_DestroyContext_true(PK11Context* context)
-{
-  PK11_DestroyContext(context, true);
-}
-
-typedef mozilla::pkix::ScopedPtr<PK11Context, PK11_DestroyContext_true>
-  ScopedPK11Context;
 typedef uint8_t SHA256Buffer[SHA256_LENGTH];
 
 SECStatus

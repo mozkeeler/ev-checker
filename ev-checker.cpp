@@ -147,26 +147,9 @@ typedef uint8_t SHA256Buffer[SHA256_LENGTH];
 SECStatus
 HashBytes(SHA256Buffer& output, const SECItem& data)
 {
-  ScopedPK11Context context(PK11_CreateDigestContext(SEC_OID_SHA256));
-  if (!context) {
-    PrintPRError("PK11_CreateDigestContext failed");
-    return SECFailure;
-  }
-  if (PK11_DigestBegin(context.get()) != SECSuccess) {
-    PrintPRError("PK11_DigestBegin failed");
-    return SECFailure;
-  }
-  if (PK11_DigestOp(context.get(), data.data, data.len) != SECSuccess) {
-    PrintPRError("PK11_DigestOp failed");
-    return SECFailure;
-  }
-  uint32_t outLen = 0;
-  if (PK11_DigestFinal(context.get(), output, &outLen, SHA256_LENGTH)
+  if (PK11_HashBuf(SEC_OID_SHA256, output, data.data, data.len)
         != SECSuccess) {
-    PrintPRError("PK11_DigestFinal failed");
-    return SECFailure;
-  }
-  if (outLen != SHA256_LENGTH) {
+    PrintPRError("PK11_HashBuf failed");
     return SECFailure;
   }
   return SECSuccess;

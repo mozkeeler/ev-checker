@@ -6,7 +6,8 @@
 
 using namespace mozilla::pkix;
 
-EVCheckerTrustDomain::EVCheckerTrustDomain()
+EVCheckerTrustDomain::EVCheckerTrustDomain(CERTCertificate* root)
+ : mRoot(root)
 {
 }
 
@@ -16,6 +17,11 @@ EVCheckerTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
                                    const SECItem& candidateCertDER,
                            /*out*/ TrustLevel* trustLevel)
 {
+  if (SECITEM_ItemsAreEqual(&candidateCertDER, &mRoot->derCert)) {
+    *trustLevel = TrustLevel::TrustAnchor;
+  } else {
+    *trustLevel = TrustLevel::InheritsTrust;
+  }
   return SECSuccess;
 }
 
@@ -24,6 +30,8 @@ EVCheckerTrustDomain::FindPotentialIssuers(const SECItem* encodedIssuerName,
                                            PRTime time,
                                    /*out*/ ScopedCERTCertList& results)
 {
+  results = CERT_CreateSubjectCertList(nullptr, CERT_GetDefaultCertDB(),
+                                       encodedIssuerName, time, true);
   return SECSuccess;
 }
 

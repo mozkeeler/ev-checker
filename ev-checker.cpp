@@ -7,29 +7,21 @@
 #include <iostream>
 
 #include "EVCheckerTrustDomain.h"
+#include "Util.h"
 #include "nss.h"
 #include "hasht.h"
 #include "pk11pub.h"
 #include "plbase64.h"
 #include "plgetopt.h"
 #include "prerror.h"
-
-void
-PrintPRError(const char* message)
-{
-  const char* err = PR_ErrorToName(PR_GetError());
-  if (err) {
-    std::cerr << message << ":" << err << std::endl;
-  } else {
-    std::cerr << message << std::endl;
-  }
-}
+#include "secerr.h"
 
 void
 PrintUsage(const char* argv0)
 {
   std::cerr << "Usage: " << argv0 << " <-e end-entity certificate>";
-  std::cerr << " <-r root certificate>" << std::endl;
+  std::cerr << " <-r root certificate> <-o dotted EV policy OID>";
+  std::cerr << " <-d EV policy description>" << std::endl;
 }
 
 inline void
@@ -221,7 +213,7 @@ typedef mozilla::pkix::ScopedPtr<PLOptState, PL_DestroyOptState>
   ScopedPLOptState;
 
 int main(int argc, char* argv[]) {
-  if (argc < 5) {
+  if (argc < 9) {
     PrintUsage(argv[0]);
     return 1;
   }
@@ -230,7 +222,7 @@ int main(int argc, char* argv[]) {
   }
   const char* endEntityFileName = nullptr;
   const char* rootFileName = nullptr;
-  const char* dottedOid = nullptr;
+  const char* dottedOID = nullptr;
   const char* oidDescription = nullptr;
   ScopedPLOptState opt(PL_CreateOptState(argc, argv, "e:r:o:d:"));
   PLOptStatus os;
@@ -246,7 +238,7 @@ int main(int argc, char* argv[]) {
         rootFileName = opt->value;
         break;
       case 'o':
-        dottedOid = opt->value;
+        dottedOID = opt->value;
         break;
       case 'd':
         oidDescription = opt->value;
@@ -256,31 +248,36 @@ int main(int argc, char* argv[]) {
         return 1;
     }
   }
-  if (!endEntityFileName || !rootFileName) {
+  if (!endEntityFileName || !rootFileName || !dottedOID || !oidDescription) {
     PrintUsage(argv[0]);
     return 1;
   }
 
   mozilla::pkix::ScopedCERTCertificate root(ReadCertFromFile(rootFileName));
   std::cout << "// " << root->issuerName << std::endl;
-  std::cout << (dottedOid ? dottedOid : "policy.OID.goes.here")
-            << "," << std::endl;
-  std::cout << "\"" << (oidDescription
-                        ? oidDescription
-                        : "OID Description goes here")
-            << "\"," << std::endl;
+  std::cout << "\"" << dottedOID << "\"," << std::endl;
+  std::cout << "\"" << oidDescription << "\"," << std::endl;
   std::cout << "SEC_OID_UNKNOWN," << std::endl;
   PrintSHA256HashOf(root->derCert);
   PrintBase64Of(root->derIssuer);
   PrintBase64Of(root->serialNumber);
   EVCheckerTrustDomain trustDomain(CERT_DupCertificate(root.get()));
+  if (trustDomain.Init(dottedOID, oidDescription) != SECSuccess) {
+    return 1;
+  }
   mozilla::pkix::ScopedCERTCertificate cert(
     ReadCertFromFile(endEntityFileName));
   mozilla::pkix::ScopedCERTCertList results;
+  mozilla::pkix::CertPolicyId evPolicy;
+  if (trustDomain.GetFirstEVPolicyForCert(cert.get(), evPolicy)
+        != SECSuccess) {
+    PrintPRError("GetFirstEVPolicyForCert failed");
+    return 1;
+  }
   SECStatus rv = BuildCertChain(trustDomain, cert.get(), PR_Now(),
                    mozilla::pkix::EndEntityOrCA::MustBeEndEntity, 0,
                    mozilla::pkix::KeyPurposeId::anyExtendedKeyUsage,
-                   mozilla::pkix::CertPolicyId::anyPolicy, nullptr, results);
+                   evPolicy, nullptr, results);
   if (rv != SECSuccess) {
     PrintPRError("BuildCertChain failed");
     return 1;

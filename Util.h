@@ -6,5 +6,14 @@
 #define Util_h
 
 void PrintPRError(const char* message);
+void PrintPRErrorString();
+
+const long EV_CHECKER_ERRORS_BASE = -(0x4000);
+
+enum EVCheckerErrorCodes {
+  EV_CHECKER_DIRECTLY_ISSUED_CERT = EV_CHECKER_ERRORS_BASE + 0
+};
+
+void RegisterEVCheckerErrors();
 
 #endif // Util_h

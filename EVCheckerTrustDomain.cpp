@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "EVCheckerTrustDomain.h"
+
 #include "Util.h"
 #include "prerror.h"
 #include "secerr.h"
@@ -126,5 +127,16 @@ EVCheckerTrustDomain::CheckRevocation(EndEntityOrCA endEntityOrCA,
 SECStatus
 EVCheckerTrustDomain::IsChainValid(const CERTCertList* certChain)
 {
+  size_t chainLen = 0;
+  for (CERTCertListNode* node = CERT_LIST_HEAD(certChain);
+       !CERT_LIST_END(node, certChain);
+       node = CERT_LIST_NEXT(node)) {
+    chainLen++;
+  }
+  if (chainLen < 3) {
+    PR_SetError(EV_CHECKER_DIRECTLY_ISSUED_CERT, 0);
+    return SECFailure;
+  }
+
   return SECSuccess;
 }

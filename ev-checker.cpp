@@ -39,7 +39,6 @@ typedef mozilla::pkix::ScopedPtr<SECItem, SECITEM_FreeItem_true> ScopedSECItem;
 CERTCertificate*
 DecodeBase64Cert(const std::string& base64)
 {
-  std::cerr << "converting '" << base64 << "' to DER" << std::endl;
   size_t derLen = (base64.length() * 3) / 4;
   if (base64[base64.length() - 1] == '=') {
     derLen--;
@@ -211,6 +210,8 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
+  RegisterEVCheckerErrors();
+
   mozilla::pkix::ScopedCERTCertList certs(ReadCertsFromFile(certsFileName));
   CERTCertificate* root = CERT_LIST_HEAD(certs.get())->cert;
   CERTCertificate* ee = CERT_LIST_TAIL(certs.get())->cert;
@@ -238,6 +239,7 @@ int main(int argc, char* argv[]) {
                    evPolicy, nullptr, results);
   if (rv != SECSuccess) {
     PrintPRError("BuildCertChain failed");
+    PrintPRErrorString();
     return 1;
   }
 

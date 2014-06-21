@@ -83,6 +83,11 @@ ReadCertsFromFile(const char* filename)
   while (!file.eof()) {
     std::string line;
     std::getline(file, line);
+    // getline appears to strip off '\n' but not '\r'
+    // (maybe it's platform-dependent?)
+    if (line.length() > 0 && line.back() == '\r') {
+      line.pop_back();
+    }
     if (line.compare(PEM_FOOTER) == 0) {
       readingCertificate = false;
       CERTCertificate* cert = DecodeBase64Cert(currentPem);
@@ -213,6 +218,11 @@ int main(int argc, char* argv[]) {
   RegisterEVCheckerErrors();
 
   mozilla::pkix::ScopedCERTCertList certs(ReadCertsFromFile(certsFileName));
+  if (CERT_LIST_END(CERT_LIST_HEAD(certs), certs)) {
+    std::cerr << "Couldn't read certificates from '" << certsFileName << "'";
+    std::cerr << std::endl;
+    return 1;
+  }
   CERTCertificate* root = CERT_LIST_HEAD(certs.get())->cert;
   CERTCertificate* ee = CERT_LIST_TAIL(certs.get())->cert;
   std::cout << "// " << root->issuerName << std::endl;

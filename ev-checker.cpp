@@ -223,8 +223,8 @@ int main(int argc, char* argv[]) {
     std::cerr << std::endl;
     return 1;
   }
-  CERTCertificate* root = CERT_LIST_HEAD(certs.get())->cert;
-  CERTCertificate* ee = CERT_LIST_TAIL(certs.get())->cert;
+  CERTCertificate* root = CERT_LIST_TAIL(certs.get())->cert;
+  CERTCertificate* ee = CERT_LIST_HEAD(certs.get())->cert;
   std::cout << "// " << root->issuerName << std::endl;
   std::cout << "\"" << dottedOID << "\"," << std::endl;
   std::cout << "\"" << oidDescription << "\"," << std::endl;

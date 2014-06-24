@@ -22,15 +22,16 @@ requirements to be enabled in Firefox.
 First, compile with `make`. There is no guarantee of portability, so feel free
 to file issues if this does not work as expected.
 
-Then, given the files `ee.pem` and `ca.pem`, the dotted OID of the EV policy,
-and a description of the policy, run `ev-checker` like so:
+Then, given the file `cert-chain.pem`, the dotted OID of the EV policy, and a
+description of the policy, run `ev-checker` like so:
 
-`./ev-checker -e ee.pem -r ca.pem -o dotted.OID -d "OID description"`
+`./ev-checker -c cert-chain.pem -r ca.pem -o dotted.OID -d "OID description"`
 
-`-e` specifies the end-entity certificate intended to be treated as an EV
-certificate. `-r` specifies the root certificate that is authoritative for the
-EV policy. NB: the handling of intermediates has not been implemented yet.
-Ironically, this is a requirement for EV treatment.
+`-c` specifies the file containing a sequence of PEM-encoded certificates. The
+first certificate is the end-entity certificate intended to tested for EV
+treatment. The last certificate is the root certificate that is authoritative
+for the given EV policy. Any certificates in between are intermediate
+certificates.
 
 `ev-checker` will output a blob of text that must be added to
 `ExtendedVerification.cpp` in the mozilla-central tree for Firefox to consider
@@ -40,7 +41,6 @@ fixed. Hopefully `ev-checker` emitted a helpful error message pointing to the
 problem.
 
 ## TODO Items ##
-* Handle intermediate certificates
 * Do OCSP fetching
-* Other policy issues (e.g. require intermediates)
+* Other policy issues
 * More helpful error messages

@@ -1,3 +1,6 @@
 .*.sw?
 *.o
 ev-checker
+test/*.pem
+test/*.key
+test/*.req

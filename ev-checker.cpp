@@ -23,9 +23,9 @@ PrintUsage(const char* argv0)
   std::cerr << "Usage: " << argv0 << " <-c certificate list file (PEM format)>";
   std::cerr << " <-o dotted EV policy OID> <-d EV policy description>";
   std::cerr << std::endl << std::endl;
-  std::cerr << "(the certificate list is expected to have the root first, ";
-  std::cerr << "followed by one or more intermediates, followed by the ";
-  std::cerr << "end-entity certificate)" << std::endl;
+  std::cerr << "(the certificate list is expected to have the end-entity ";
+  std::cerr << "certificate first, followed by one or more intermediates, ";
+  std::cerr << "followed by the root certificate)" << std::endl;
 }
 
 inline void

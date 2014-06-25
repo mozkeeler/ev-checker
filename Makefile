@@ -22,4 +22,4 @@ $(EXECUTABLE): $(OBJECTS)
 	$(CC) $(CFLAGS) $< -o $@
 
 clean:
-	rm -f $(EXECUTABLE) $(OBJECTS) test/*.pem test/*.key test/*.req
+	rm -f $(EXECUTABLE) $(OBJECTS) test/*.pem test/*.key test/*.req test/run-tests.sh

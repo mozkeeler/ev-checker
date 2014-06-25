@@ -28,7 +28,7 @@ description of the policy, run `ev-checker` like so:
 `./ev-checker -c cert-chain.pem -r ca.pem -o dotted.OID -d "OID description"`
 
 `-c` specifies the file containing a sequence of PEM-encoded certificates. The
-first certificate is the end-entity certificate intended to tested for EV
+first certificate is the end-entity certificate intended to be tested for EV
 treatment. The last certificate is the root certificate that is authoritative
 for the given EV policy. Any certificates in between are intermediate
 certificates.

@@ -1,0 +1,13 @@
+label {
+  width: 160px;
+  float: left;
+}
+
+input {
+  float: left;
+}
+
+div.labelInputPair {
+  float: left;
+  width: 100%;
+}

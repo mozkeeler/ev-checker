@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>EV Checking Tool</title>
+  <link rel="stylesheet" type="text/css" href="index.css">
+</head>
+<body>
+  <h1>
+    EV Checking Tool
+  </h1>
+  <form id="form">
+    <div class="labelInputPair">
+      <label for="host">Host:</label>
+      <input type="text" name="host">
+    </div>
+    <div class="labelInputPair">
+      <label for="rootPEM">Root certificate:</label>
+      <input type="file" name="rootPEM">
+    </div>
+    <div class="labelInputPair">
+      <label for="oid">Policy OID:</label>
+      <input type="text" name="oid">
+    </div>
+    <div class="labelInputPair">
+      <label for="description">Description:</label>
+      <input type="text" name="description">
+    </div>
+    <div class="labelInputPair">
+      <input type="submit" value="Run Checker" onclick="sendForm(event);">
+    </div>
+  </form>
+  <div>
+    <textarea id="result" rows=24 cols=80 readonly=true></textarea>
+  </div>
+  <script>
+    function sendForm(evt) {
+      evt.preventDefault();
+      var form = document.getElementById("form");
+      var formData = new FormData(form);
+      var req = new XMLHttpRequest();
+      req.open("POST", "/run-checker", true);
+      req.onreadystatechange = function(evt) {
+        if (req.readyState == 4) {
+          var resultArea = document.getElementById("result");
+          resultArea.textContent = req.responseText;
+        }
+      };
+      req.send(formData);
+    }
+  </script>
+</body>
+</html>

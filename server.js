@@ -29,6 +29,32 @@ function runChecker(host, rootPEM, oid, description, continuation) {
   });
 }
 
+function validateHost(hostField) {
+  if (!hostField) {
+    return null;
+  }
+  return url.parse("https://" + hostField).host;
+}
+
+function validatePEM(rootPEMContents) {
+  if (!rootPEMContents) {
+    return null;
+  }
+  var pemRegEx = /^-----BEGIN CERTIFICATE-----[0-9A-Za-z+\/=]+-----END CERTIFICATE-----$/;
+  var rootPEMNoNewlines = rootPEMContents.toString().replace(/[\r\n]/g, "");
+  return pemRegEx.test(rootPEMNoNewlines) ? rootPEMContents : null;
+}
+
+function validateOID(oidField) {
+  var oidRegEx = /^([0-9]+\.)*[0-9]+$/;
+  return oidRegEx.test(oidField) ? oidField : null;
+}
+
+function validateDescription(descriptionField) {
+  var descriptionRegEx = /^[0-9A-Za-z ]+$/;
+  return descriptionRegEx.test(descriptionField) ? descriptionField : null;
+}
+
 function handleRunChecker(request, response) {
   var form = new formidable.IncomingForm();
   form.parse(request, function(err, fields, files) {
@@ -39,11 +65,16 @@ function handleRunChecker(request, response) {
       return;
     }
 
-    var urlFromHost = url.parse("https://" + fields['host']);
-    var rootPEM = fs.readFileSync(files['rootPEM'].path);
-    var oid = fields['oid'];
-    var description = fields['description'];
-    runChecker(urlFromHost.host, rootPEM, oid, description, function(result) {
+    var host = validateHost(fields['host']);
+    var rootPEM = validatePEM(fs.readFileSync(files['rootPEM'].path));
+    var oid = validateOID(fields['oid']);
+    var description = validateDescription(fields['description']);
+    if (!host || !rootPEM || !oid || !description) {
+      response.writeHead(200);
+      response.end("Validation of input parameters failed.");
+      return;
+    }
+    runChecker(host, rootPEM, oid, description, function(result) {
       response.writeHead(200, {
         'Content-Type': 'test/plain'
       });

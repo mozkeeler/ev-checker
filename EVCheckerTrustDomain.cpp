@@ -2,11 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include <curl/curl.h>
+
 #include "EVCheckerTrustDomain.h"
 
 #include "Util.h"
 #include "prerror.h"
 #include "secerr.h"
+#include "ocsp.h"
 
 using namespace mozilla::pkix;
 
@@ -114,6 +117,72 @@ EVCheckerTrustDomain::FindPotentialIssuers(const SECItem* encodedIssuerName,
   return SECSuccess;
 }
 
+struct WriteOCSPRequestDataClosure
+{
+  PLArenaPool* arena;
+  SECItem* currentData;
+};
+
+size_t
+WriteOCSPRequestData(void* ptr, size_t size, size_t nmemb, void* userdata)
+{
+  WriteOCSPRequestDataClosure* closure(
+    reinterpret_cast<WriteOCSPRequestDataClosure*>(userdata));
+  if (!closure || !closure->arena) {
+    return 0;
+  }
+
+  if (!closure->currentData) {
+    closure->currentData = SECITEM_AllocItem(closure->arena, nullptr,
+                                             size * nmemb);
+    if (!closure->currentData) {
+      return 0;
+    }
+
+    memcpy(closure->currentData->data, ptr, size * nmemb);
+    return size * nmemb;
+  }
+
+  SECItem* tmp = SECITEM_AllocItem(closure->arena, nullptr,
+                                   closure->currentData->len + (size * nmemb));
+  if (!tmp) {
+    return 0;
+  }
+  memcpy(tmp->data, closure->currentData->data, closure->currentData->len);
+  memcpy(tmp->data + closure->currentData->len, ptr, size * nmemb);
+  SECITEM_FreeItem(closure->currentData, true);
+  closure->currentData = tmp;
+  return size * nmemb;
+}
+
+// Data returned is owned by arena.
+SECItem*
+MakeOCSPRequest(PLArenaPool* arena, const char* url, const SECItem* ocspRequest)
+{
+  if (!arena || !ocspRequest) {
+    PR_SetError(SEC_ERROR_INVALID_ARGS, 0);
+    return nullptr;
+  }
+
+  WriteOCSPRequestDataClosure closure({ arena, nullptr });
+  CURL* curl = curl_easy_init();
+  curl_easy_setopt(curl, CURLOPT_URL, url);
+  curl_easy_setopt(curl, CURLOPT_POSTFIELDS, ocspRequest->data);
+  curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, ocspRequest->len);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteOCSPRequestData);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &closure);
+  CURLcode res = curl_easy_perform(curl);
+  if (res != CURLE_OK) {
+    if (closure.currentData) {
+      SECITEM_FreeItem(closure.currentData, true);
+    }
+    PR_SetError(SEC_ERROR_OCSP_SERVER_ERROR, 0);
+    return nullptr;
+  }
+
+  return closure.currentData;
+}
+
 SECStatus
 EVCheckerTrustDomain::CheckRevocation(EndEntityOrCA endEntityOrCA,
                                       const CERTCertificate* cert,
@@ -121,7 +190,31 @@ EVCheckerTrustDomain::CheckRevocation(EndEntityOrCA endEntityOrCA,
                                       PRTime time,
                          /*optional*/ const SECItem* stapledOCSPresponse)
 {
-  return SECSuccess;
+  ScopedString aiaURL(CERT_GetOCSPAuthorityInfoAccessLocation(cert));
+  if (!aiaURL) {
+    PR_SetError(EV_CHECKER_NO_OCSP_AIA, 0);
+    return SECFailure;
+  }
+
+  ScopedPLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
+  if (!arena) {
+    return SECFailure;
+  }
+
+  SECItem* ocspRequest = CreateEncodedOCSPRequest(arena.get(), cert,
+                                                  issuerCertToDup);
+  if (!ocspRequest) {
+    return SECFailure;
+  }
+
+  SECItem* ocspResponse = MakeOCSPRequest(arena.get(), aiaURL.get(),
+                                          ocspRequest);
+  if (!ocspResponse) {
+    return SECFailure;
+  }
+
+  return VerifyEncodedOCSPResponse(*this, cert, issuerCertToDup, time, 10,
+                                   ocspResponse, nullptr, nullptr);
 }
 
 SECStatus

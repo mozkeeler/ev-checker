@@ -4,7 +4,7 @@
 
 CC=clang++
 CFLAGS=-Ipkix/include -I/usr/include/nspr4/ -I/usr/include/nss3 -g -Wall -c -std=c++11
-LDFLAGS=-lnss3 -lnssutil3 -lnspr4 -lplc4
+LDFLAGS=-lnss3 -lnssutil3 -lnspr4 -lplc4 -lcurl
 SOURCES=pkix/lib/pkixbind.cpp pkix/lib/pkixbuild.cpp pkix/lib/pkixcheck.cpp \
         pkix/lib/pkixder.cpp pkix/lib/pkixkey.cpp pkix/lib/pkixocsp.cpp \
 				ev-checker.cpp \

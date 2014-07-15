@@ -28,7 +28,10 @@ PrintPRErrorString()
 static const struct PRErrorMessage EVCheckerErrorsTableText[] = {
   { "EV_CHECKER_DIRECTLY_ISSUED_CERT",
     "The root certificate directly issued the end-entity certificate. "
-    "This is invalid under the baseline requirements for EV." }
+    "This is invalid under the baseline requirements for EV." },
+  { "EV_CHECKER_NO_OCSP_AIA",
+    "The certificate has no OCSP Authority Info Access Location or it "
+    "is malformed. Revocation checking cannot be performed." }
 };
 
 static const struct PRErrorTable EVCheckerErrorsTable = {
@@ -42,4 +45,10 @@ void
 RegisterEVCheckerErrors()
 {
   PR_ErrorInstallTable(&EVCheckerErrorsTable);
+}
+
+void
+PortFreeString(const char* ptr)
+{
+  PORT_Free((void*)ptr);
 }

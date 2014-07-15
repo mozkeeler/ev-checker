@@ -5,15 +5,20 @@
 #ifndef Util_h
 #define Util_h
 
+#include "pkix/pkixtypes.h"
+
 void PrintPRError(const char* message);
 void PrintPRErrorString();
 
 const long EV_CHECKER_ERRORS_BASE = -(0x4000);
 
 enum EVCheckerErrorCodes {
-  EV_CHECKER_DIRECTLY_ISSUED_CERT = EV_CHECKER_ERRORS_BASE + 0
+  EV_CHECKER_DIRECTLY_ISSUED_CERT = EV_CHECKER_ERRORS_BASE + 0,
+  EV_CHECKER_NO_OCSP_AIA          = EV_CHECKER_ERRORS_BASE + 1
 };
 
 void RegisterEVCheckerErrors();
+void PortFreeString(const char* ptr);
+typedef mozilla::pkix::ScopedPtr<const char, PortFreeString> ScopedString;
 
 #endif // Util_h

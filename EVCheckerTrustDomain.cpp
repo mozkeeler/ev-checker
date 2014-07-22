@@ -169,6 +169,10 @@ MakeOCSPRequest(PLArenaPool* arena, const char* url, const SECItem* ocspRequest)
   curl_easy_setopt(curl, CURLOPT_URL, url);
   curl_easy_setopt(curl, CURLOPT_POSTFIELDS, ocspRequest->data);
   curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, ocspRequest->len);
+  mozilla::pkix::ScopedPtr<struct curl_slist, curl_slist_free_all>
+    contentType(curl_slist_append(nullptr,
+                                  "Content-Type: application/ocsp-request"));
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, contentType.get());
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteOCSPRequestData);
   curl_easy_setopt(curl, CURLOPT_WRITEDATA, &closure);
   CURLcode res = curl_easy_perform(curl);
@@ -180,7 +184,11 @@ MakeOCSPRequest(PLArenaPool* arena, const char* url, const SECItem* ocspRequest)
     return nullptr;
   }
 
-  return closure.currentData;
+  if (closure.currentData) {
+    return closure.currentData;
+  }
+  PR_SetError(SEC_ERROR_OCSP_SERVER_ERROR, 0);
+  return nullptr;
 }
 
 SECStatus

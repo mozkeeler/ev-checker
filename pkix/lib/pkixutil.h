@@ -25,57 +25,9 @@
 #ifndef mozilla_pkix__pkixutil_h
 #define mozilla_pkix__pkixutil_h
 
-#include "pkix/enumclass.h"
-#include "pkix/pkixtypes.h"
-#include "prerror.h"
-#include "seccomon.h"
-#include "secerr.h"
+#include "pkixder.h"
 
 namespace mozilla { namespace pkix {
-
-enum Result
-{
-  Success = 0,
-  FatalError = -1,      // An error was encountered that caused path building
-                        // to stop immediately. example: out-of-memory.
-  RecoverableError = -2 // an error that will cause path building to continue
-                        // searching for alternative paths. example: expired
-                        // certificate.
-};
-
-// When returning errors, use this function instead of calling PR_SetError
-// directly. This helps ensure that we always call PR_SetError when we return
-// an error code. This is a useful place to set a breakpoint when a debugging
-// a certificate verification failure.
-inline Result
-Fail(Result result, PRErrorCode errorCode)
-{
-  PR_ASSERT(result != Success);
-  PR_SetError(errorCode, 0);
-  return result;
-}
-
-inline Result
-MapSECStatus(SECStatus srv)
-{
-  if (srv == SECSuccess) {
-    return Success;
-  }
-
-  PRErrorCode error = PORT_GetError();
-  switch (error) {
-    case SEC_ERROR_EXTENSION_NOT_FOUND:
-      return RecoverableError;
-
-    case PR_INVALID_STATE_ERROR:
-    case SEC_ERROR_LIBRARY_FAILURE:
-    case SEC_ERROR_NO_MEMORY:
-      return FatalError;
-  }
-
-  // TODO: PORT_Assert(false); // we haven't classified the error yet
-  return RecoverableError;
-}
 
 // During path building and verification, we build a linked list of BackCerts
 // from the current cert toward the end-entity certificate. The linked list
@@ -89,72 +41,157 @@ MapSECStatus(SECStatus srv)
 class BackCert
 {
 public:
-  // IncludeCN::No means that GetConstrainedNames won't include the subject CN
-  // in its results. IncludeCN::Yes means that GetConstrainedNames will include
-  // the subject CN in its results.
-  MOZILLA_PKIX_ENUM_CLASS IncludeCN { No = 0, Yes = 1 };
-
-  // nssCert and childCert must be valid for the lifetime of BackCert
-  BackCert(BackCert* childCert, IncludeCN includeCN)
-    : encodedBasicConstraints(nullptr)
-    , encodedCertificatePolicies(nullptr)
-    , encodedExtendedKeyUsage(nullptr)
-    , encodedKeyUsage(nullptr)
-    , encodedNameConstraints(nullptr)
-    , encodedInhibitAnyPolicy(nullptr)
+  // certDER and childCert must be valid for the lifetime of BackCert.
+  BackCert(Input certDER, EndEntityOrCA endEntityOrCA,
+           const BackCert* childCert)
+    : der(certDER)
+    , endEntityOrCA(endEntityOrCA)
     , childCert(childCert)
-    , constrainedNames(nullptr)
-    , includeCN(includeCN)
   {
   }
 
-  Result Init(const SECItem& certDER);
+  Result Init();
 
-  const SECItem& GetDER() const { return nssCert->derCert; }
-  const SECItem& GetIssuer() const { return nssCert->derIssuer; }
-  const SECItem& GetSubject() const { return nssCert->derSubject; }
-  const SECItem& GetSubjectPublicKeyInfo() const
+  const Input GetDER() const { return der; }
+  const der::Version GetVersion() const { return version; }
+  const SignedDataWithSignature& GetSignedData() const { return signedData; }
+  const Input GetIssuer() const { return issuer; }
+  // XXX: "validity" is a horrible name for the structure that holds
+  // notBefore & notAfter, but that is the name used in RFC 5280 and we use the
+  // RFC 5280 names for everything.
+  const Input GetValidity() const { return validity; }
+  const Input GetSerialNumber() const { return serialNumber; }
+  const Input GetSubject() const { return subject; }
+  const Input GetSubjectPublicKeyInfo() const
   {
-    return nssCert->derPublicKey;
+    return subjectPublicKeyInfo;
   }
-
-  Result VerifyOwnSignatureWithKey(TrustDomain& trustDomain,
-                                   const SECItem& subjectPublicKeyInfo) const;
-
-  const SECItem* encodedBasicConstraints;
-  const SECItem* encodedCertificatePolicies;
-  const SECItem* encodedExtendedKeyUsage;
-  const SECItem* encodedKeyUsage;
-  const SECItem* encodedNameConstraints;
-  const SECItem* encodedInhibitAnyPolicy;
-
-  BackCert* const childCert;
-
-  // Only non-const so that we can pass this to TrustDomain::IsRevoked,
-  // which only takes a non-const pointer because VerifyEncodedOCSPResponse
-  // requires it, and that is only because the implementation of
-  // VerifyEncodedOCSPResponse does a CERT_DupCertificate. TODO: get rid
-  // of that CERT_DupCertificate so that we can make all these things const.
-  /*const*/ CERTCertificate* GetNSSCert() const { return nssCert.get(); }
-
-  // Returns the names that should be considered when evaluating name
-  // constraints. The list is constructed lazily and cached. The result is a
-  // weak reference; do not try to free it, and do not hold long-lived
-  // references to it.
-  Result GetConstrainedNames(/*out*/ const CERTGeneralName** result);
-
-  PLArenaPool* GetArena();
+  const Input* GetAuthorityInfoAccess() const
+  {
+    return MaybeInput(authorityInfoAccess);
+  }
+  const Input* GetBasicConstraints() const
+  {
+    return MaybeInput(basicConstraints);
+  }
+  const Input* GetCertificatePolicies() const
+  {
+    return MaybeInput(certificatePolicies);
+  }
+  const Input* GetExtKeyUsage() const
+  {
+    return MaybeInput(extKeyUsage);
+  }
+  const Input* GetKeyUsage() const
+  {
+    return MaybeInput(keyUsage);
+  }
+  const Input* GetInhibitAnyPolicy() const
+  {
+    return MaybeInput(inhibitAnyPolicy);
+  }
+  const Input* GetNameConstraints() const
+  {
+    return MaybeInput(nameConstraints);
+  }
 
 private:
-  ScopedCERTCertificate nssCert;
+  const Input der;
 
-  ScopedPLArenaPool arena;
-  CERTGeneralName* constrainedNames;
-  IncludeCN includeCN;
+public:
+  const EndEntityOrCA endEntityOrCA;
+  BackCert const* const childCert;
+
+private:
+  der::Version version;
+
+  // When parsing certificates in BackCert::Init, we don't accept empty
+  // extensions. Consequently, we don't have to store a distinction between
+  // empty extensions and extensions that weren't included. However, when
+  // *processing* extensions, we distinguish between whether an extension was
+  // included or not based on whetehr the GetXXX function for the extension
+  // returns nullptr.
+  static inline const Input* MaybeInput(const Input& item)
+  {
+    return item.GetLength() > 0 ? &item : nullptr;
+  }
+
+  SignedDataWithSignature signedData;
+  Input issuer;
+  // XXX: "validity" is a horrible name for the structure that holds
+  // notBefore & notAfter, but that is the name used in RFC 5280 and we use the
+  // RFC 5280 names for everything.
+  Input validity;
+  Input serialNumber;
+  Input subject;
+  Input subjectPublicKeyInfo;
+
+  Input authorityInfoAccess;
+  Input basicConstraints;
+  Input certificatePolicies;
+  Input extKeyUsage;
+  Input inhibitAnyPolicy;
+  Input keyUsage;
+  Input nameConstraints;
+  Input subjectAltName;
+
+  Result RememberExtension(Reader& extnID, const Input& extnValue,
+                           /*out*/ bool& understood);
 
   BackCert(const BackCert&) /* = delete */;
   void operator=(const BackCert&); /* = delete */;
 };
+
+class NonOwningDERArray : public DERArray
+{
+public:
+  NonOwningDERArray()
+    : numItems(0)
+  {
+    // we don't need to initialize the items array because we always check
+    // numItems before accessing i.
+  }
+
+  virtual size_t GetLength() const { return numItems; }
+
+  virtual const Input* GetDER(size_t i) const
+  {
+    return i < numItems ? &items[i] : nullptr;
+  }
+
+  Result Append(Input der)
+  {
+    if (numItems >= MAX_LENGTH) {
+      return Result::FATAL_ERROR_INVALID_ARGS;
+    }
+    Result rv = items[numItems].Init(der); // structure assignment
+    if (rv != Success) {
+      return rv;
+    }
+    ++numItems;
+    return Success;
+  }
+
+  // Public so we can static_assert on this. Keep in sync with MAX_SUBCA_COUNT.
+  static const size_t MAX_LENGTH = 8;
+private:
+  Input items[MAX_LENGTH]; // avoids any heap allocations
+  size_t numItems;
+
+  NonOwningDERArray(const NonOwningDERArray&) /* = delete*/;
+  void operator=(const NonOwningDERArray&) /* = delete*/;
+};
+
+inline unsigned int
+DaysBeforeYear(unsigned int year)
+{
+  assert(year >= 1);
+  assert(year <= 9999);
+  return ((year - 1u) * 365u)
+       + ((year - 1u) / 4u)    // leap years are every 4 years,
+       - ((year - 1u) / 100u)  // except years divisible by 100,
+       + ((year - 1u) / 400u); // except years divisible by 400.
+}
 
 } } // namespace mozilla::pkix
 

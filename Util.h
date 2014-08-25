@@ -6,6 +6,22 @@
 #define Util_h
 
 #include "pkix/pkixtypes.h"
+#include "pkix/ScopedPtr.h"
+
+#include "cert.h"
+
+inline void
+PORT_FreeArena_false(PLArenaPool* arena)
+{
+  return PORT_FreeArena(arena, false);
+}
+
+typedef mozilla::pkix::ScopedPtr<CERTCertificate, CERT_DestroyCertificate>
+  ScopedCERTCertificate;
+typedef mozilla::pkix::ScopedPtr<CERTCertList, CERT_DestroyCertList>
+  ScopedCERTCertList;
+typedef mozilla::pkix::ScopedPtr<PLArenaPool, PORT_FreeArena_false>
+  ScopedPLArenaPool;
 
 void PrintPRError(const char* message);
 void PrintPRErrorString();

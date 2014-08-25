@@ -215,7 +215,7 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  RegisterEVCheckerErrors();
+  mozilla::pkix::RegisterErrorTable();
 
   ScopedCERTCertList certs(ReadCertsFromFile(certsFileName));
   if (CERT_LIST_END(CERT_LIST_HEAD(certs), certs)) {
@@ -255,6 +255,7 @@ int main(int argc, char* argv[]) {
                       mozilla::pkix::KeyPurposeId::anyExtendedKeyUsage,
                       evPolicy, nullptr);
   if (rv != mozilla::pkix::Success) {
+    PR_SetError(mozilla::pkix::MapResultToPRErrorCode(rv), 0);
     PrintPRError("BuildCertChain failed");
     PrintPRErrorString();
     return 1;

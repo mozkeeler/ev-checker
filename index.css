@@ -1,10 +1,11 @@
 label {
-  width: 160px;
+  width: 260px;
   float: left;
 }
 
-input {
+input[type="text"] {
   float: left;
+  width: 260px;
 }
 
 div.labelInputPair {

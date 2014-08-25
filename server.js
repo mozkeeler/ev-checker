@@ -35,7 +35,9 @@ function validateHost(hostField) {
   if (!hostField) {
     return null;
   }
-  var parsed = url.parse("https://" + hostField);
+  var parsed = url.parse(hostField.indexOf("https://") == 0
+                         ? hostField
+                         : "https://" + hostField);
   return { host: parsed.hostname,
            port: parsed.port };
 }

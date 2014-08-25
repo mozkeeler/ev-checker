@@ -25,16 +25,13 @@ typedef mozilla::pkix::ScopedPtr<PLArenaPool, PORT_FreeArena_false>
 
 void PrintPRError(const char* message);
 void PrintPRErrorString();
+void PrintEVError(const char* message);
 
-const long EV_CHECKER_ERRORS_BASE = -(0x4000);
-
-enum EVCheckerErrorCodes {
-  EV_CHECKER_DIRECTLY_ISSUED_CERT = EV_CHECKER_ERRORS_BASE + 0,
-  EV_CHECKER_NO_OCSP_AIA          = EV_CHECKER_ERRORS_BASE + 1
-};
-
-void RegisterEVCheckerErrors();
-void PortFreeString(const char* ptr);
+inline void
+PortFreeString(const char* ptr)
+{
+  PORT_Free((void*)ptr);
+}
 typedef mozilla::pkix::ScopedPtr<const char, PortFreeString> ScopedString;
 
 #endif // Util_h

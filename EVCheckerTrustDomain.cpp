@@ -186,40 +186,54 @@ public:
 };
 
 // Data returned is owned by arena.
-SECItem*
+Result
 MakeOCSPRequest(PLArenaPool* arena, const char* url, const uint8_t* ocspRequest,
-                size_t ocspRequestLength)
+                size_t ocspRequestLength, SECItem** ocspResponsePtr)
 {
   if (!arena || !ocspRequest) {
-    PR_SetError(SEC_ERROR_INVALID_ARGS, 0);
-    return nullptr;
+    return Result::FATAL_ERROR_INVALID_ARGS;
   }
-
-  WriteOCSPRequestDataClosure closure({ arena, nullptr });
   CURLWrapper curl(curl_easy_init());
-  curl_easy_setopt(curl.get(), CURLOPT_URL, url);
-  curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDS, ocspRequest);
-  curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDSIZE, ocspRequestLength);
+  if (!curl.get()) {
+    return Result::FATAL_ERROR_LIBRARY_FAILURE;
+  }
+  CURLcode res = curl_easy_setopt(curl.get(), CURLOPT_URL, url);
+  if (res != CURLE_OK) {
+    return Result::FATAL_ERROR_LIBRARY_FAILURE;
+  }
+  res = curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDS, ocspRequest);
+  if (res != CURLE_OK) {
+    return Result::FATAL_ERROR_LIBRARY_FAILURE;
+  }
+  res = curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDSIZE, ocspRequestLength);
+  if (res != CURLE_OK) {
+    return Result::FATAL_ERROR_LIBRARY_FAILURE;
+  }
   mozilla::pkix::ScopedPtr<struct curl_slist, curl_slist_free_all>
     contentType(curl_slist_append(nullptr,
                                   "Content-Type: application/ocsp-request"));
-  curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER, contentType.get());
-  curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, WriteOCSPRequestData);
-  curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &closure);
-  CURLcode res = curl_easy_perform(curl.get());
+  res = curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER, contentType.get());
   if (res != CURLE_OK) {
-    if (closure.currentData) {
-      SECITEM_FreeItem(closure.currentData, true);
-    }
-    PR_SetError(SEC_ERROR_OCSP_SERVER_ERROR, 0);
-    return nullptr;
+    return Result::FATAL_ERROR_LIBRARY_FAILURE;
   }
-
+  res = curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, WriteOCSPRequestData);
+  if (res != CURLE_OK) {
+    return Result::FATAL_ERROR_LIBRARY_FAILURE;
+  }
+  WriteOCSPRequestDataClosure closure({ arena, nullptr });
+  res = curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &closure);
+  if (res != CURLE_OK) {
+    return Result::FATAL_ERROR_LIBRARY_FAILURE;
+  }
+  res = curl_easy_perform(curl.get());
+  if (res != CURLE_OK) {
+    return Result::ERROR_OCSP_SERVER_ERROR;
+  }
   if (closure.currentData) {
-    return closure.currentData;
+    *ocspResponsePtr = closure.currentData;
+    return Success;
   }
-  PR_SetError(SEC_ERROR_OCSP_SERVER_ERROR, 0);
-  return nullptr;
+  return Result::ERROR_OCSP_SERVER_ERROR;
 }
 
 // Copied and modified from CERT_GetOCSPAuthorityInfoAccessLocation and
@@ -283,7 +297,7 @@ EVCheckerTrustDomain::CheckRevocation(EndEntityOrCA endEntityOrCA,
                                       const Input* aiaExtension)
 {
   if (!aiaExtension) {
-    return Result::ERROR_UNKNOWN_ERROR;
+    return Result::ERROR_CERT_BAD_ACCESS_LOCATION;
   }
   ScopedPLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
   if (!arena) {
@@ -302,10 +316,11 @@ EVCheckerTrustDomain::CheckRevocation(EndEntityOrCA endEntityOrCA,
     return rv;
   }
 
-  SECItem* ocspResponse = MakeOCSPRequest(arena.get(), url, ocspRequest,
-                                          ocspRequestLength);
-  if (!ocspResponse) {
-    return Result::FATAL_ERROR_NO_MEMORY;
+  SECItem* ocspResponse = nullptr;
+  rv = MakeOCSPRequest(arena.get(), url, ocspRequest, ocspRequestLength,
+                       &ocspResponse);
+  if (rv != Success) {
+    return rv;
   }
   Input ocspResponseInput;
   rv = ocspResponseInput.Init(ocspResponse->data, ocspResponse->len);
@@ -331,7 +346,7 @@ Result
 EVCheckerTrustDomain::IsChainValid(const DERArray& certChain)
 {
   if (certChain.GetLength() < 3) {
-    return Result::ERROR_UNKNOWN_ERROR;
+    return Result::ERROR_POLICY_VALIDATION_FAILED;
   }
 
   return Success;

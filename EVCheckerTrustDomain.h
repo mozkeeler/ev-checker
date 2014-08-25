@@ -6,7 +6,12 @@
 #define EVCheckerTrustDomain_h
 
 #include "pkix/pkix.h"
+#include "pkix/pkixnss.h"
 #include "pkix/pkixtypes.h"
+
+#include "cert.h"
+
+#include "Util.h"
 
 class EVCheckerTrustDomain : public mozilla::pkix::TrustDomain
 {
@@ -16,35 +21,45 @@ public:
   SECStatus Init(const char* dottedEVPolicyOID, const char* evPolicyName);
 
   SECStatus GetFirstEVPolicyForCert(const CERTCertificate* cert,
-                     /*out*/ mozilla::pkix::CertPolicyId& policy);
+                            /*out*/ mozilla::pkix::CertPolicyId& policy);
 
-  virtual SECStatus GetCertTrust(mozilla::pkix::EndEntityOrCA endEntityOrCA,
-                                 const mozilla::pkix::CertPolicyId& policy,
-                                 const SECItem& candidateCertDER,
-                         /*out*/ mozilla::pkix::TrustLevel* trustLevel);
+  mozilla::pkix::Result GetCertTrust(mozilla::pkix::EndEntityOrCA endEntityOrCA,
+                                     const mozilla::pkix::CertPolicyId& policy,
+                                     mozilla::pkix::Input candidateCertDER,
+                             /*out*/ mozilla::pkix::TrustLevel& trustLevel);
 
-  virtual SECStatus FindPotentialIssuers(
-                      const SECItem* encodedIssuerName,
-                      PRTime time,
-              /*out*/ mozilla::pkix::ScopedCERTCertList& results);
+  mozilla::pkix::Result FindIssuer(mozilla::pkix::Input encodedIssuerName,
+                                   mozilla::pkix::TrustDomain::IssuerChecker& checker,
+                                   mozilla::pkix::Time time);
 
-  virtual SECStatus VerifySignedData(const CERTSignedData* signedData,
-                                     const SECItem& subjectPublicKeyInfo)
+  mozilla::pkix::Result CheckRevocation(mozilla::pkix::EndEntityOrCA endEntityOrCA,
+                                        const mozilla::pkix::CertID& certID,
+                                        mozilla::pkix::Time time,
+                                        const mozilla::pkix::Input* stapledOCSPResponse,
+                                        const mozilla::pkix::Input* aiaExtension);
+
+  mozilla::pkix::Result IsChainValid(const mozilla::pkix::DERArray& certChain);
+
+  mozilla::pkix::Result CheckPublicKey(mozilla::pkix::Input subjectPublicKeyInfo)
+  {
+    return ::mozilla::pkix::CheckPublicKey(subjectPublicKeyInfo);
+  }
+
+  mozilla::pkix::Result VerifySignedData(const mozilla::pkix::SignedDataWithSignature& signedData,
+                                         mozilla::pkix::Input subjectPublicKeyInfo)
   {
     return mozilla::pkix::VerifySignedData(signedData, subjectPublicKeyInfo,
                                            nullptr);
   }
 
-  virtual SECStatus CheckRevocation(mozilla::pkix::EndEntityOrCA endEntityOrCA,
-                                    const CERTCertificate* cert,
-                          /*const*/ CERTCertificate* issuerCertToDup,
-                                    PRTime time,
-                       /*optional*/ const SECItem* stapledOCSPresponse);
-
-  virtual SECStatus IsChainValid(const CERTCertList* certChain);
+  mozilla::pkix::Result DigestBuf(mozilla::pkix::Input item,
+                          /*out*/ uint8_t* digestBuf, size_t digestBufLen)
+  {
+    return ::mozilla::pkix::DigestBuf(item, digestBuf, digestBufLen);
+  }
 
 private:
-  mozilla::pkix::ScopedCERTCertificate mRoot;
+  ScopedCERTCertificate mRoot;
   SECOidTag mEVPolicyOIDTag;
 };
 

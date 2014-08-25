@@ -93,28 +93,50 @@ EVCheckerTrustDomain::Init(const char* dottedEVPolicyOID,
   return SECSuccess;
 }
 
-SECStatus
+Result
 EVCheckerTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
                                    const CertPolicyId& policy,
-                                   const SECItem& candidateCertDER,
-                           /*out*/ TrustLevel* trustLevel)
+                                   Input candidateCertDER,
+                           /*out*/ TrustLevel& trustLevel)
 {
-  if (SECITEM_ItemsAreEqual(&candidateCertDER, &mRoot->derCert)) {
-    *trustLevel = TrustLevel::TrustAnchor;
+  SECItem candidateCertDERSECItem = UnsafeMapInputToSECItem(candidateCertDER);
+  if (SECITEM_ItemsAreEqual(&candidateCertDERSECItem, &mRoot->derCert)) {
+    trustLevel = TrustLevel::TrustAnchor;
   } else {
-    *trustLevel = TrustLevel::InheritsTrust;
+    trustLevel = TrustLevel::InheritsTrust;
   }
-  return SECSuccess;
+  return Success;
 }
 
-SECStatus
-EVCheckerTrustDomain::FindPotentialIssuers(const SECItem* encodedIssuerName,
-                                           PRTime time,
-                                   /*out*/ ScopedCERTCertList& results)
+Result
+EVCheckerTrustDomain::FindIssuer(Input encodedIssuerName,
+                                 TrustDomain::IssuerChecker& checker, Time time)
 {
-  results = CERT_CreateSubjectCertList(nullptr, CERT_GetDefaultCertDB(),
-                                       encodedIssuerName, time, true);
-  return SECSuccess;
+  SECItem encodedIssuerNameSECItem = UnsafeMapInputToSECItem(encodedIssuerName);
+  ScopedCERTCertList candidates(
+    CERT_CreateSubjectCertList(nullptr, CERT_GetDefaultCertDB(),
+                               &encodedIssuerNameSECItem, 0, false));
+  if (candidates) {
+    for (CERTCertListNode* n = CERT_LIST_HEAD(candidates);
+         !CERT_LIST_END(n, candidates); n = CERT_LIST_NEXT(n)) {
+      Input certDER;
+      Result rv = certDER.Init(n->cert->derCert.data, n->cert->derCert.len);
+      if (rv != Success) {
+        continue; // probably too big
+      }
+
+      bool keepGoing;
+      rv = checker.Check(certDER, nullptr, keepGoing);
+      if (rv != Success) {
+        return rv;
+      }
+      if (!keepGoing) {
+        break;
+      }
+    }
+  }
+
+  return Success;
 }
 
 struct WriteOCSPRequestDataClosure
@@ -150,14 +172,23 @@ WriteOCSPRequestData(void* ptr, size_t size, size_t nmemb, void* userdata)
   }
   memcpy(tmp->data, closure->currentData->data, closure->currentData->len);
   memcpy(tmp->data + closure->currentData->len, ptr, size * nmemb);
-  SECITEM_FreeItem(closure->currentData, true);
   closure->currentData = tmp;
   return size * nmemb;
 }
 
+class CURLWrapper
+{
+public:
+  explicit CURLWrapper(CURL* curl) : mCURL(curl) {}
+  ~CURLWrapper() { if (mCURL) { curl_easy_cleanup(mCURL); } }
+  CURL* get() { return mCURL; }
+  CURL* mCURL;
+};
+
 // Data returned is owned by arena.
 SECItem*
-MakeOCSPRequest(PLArenaPool* arena, const char* url, const SECItem* ocspRequest)
+MakeOCSPRequest(PLArenaPool* arena, const char* url, const uint8_t* ocspRequest,
+                size_t ocspRequestLength)
 {
   if (!arena || !ocspRequest) {
     PR_SetError(SEC_ERROR_INVALID_ARGS, 0);
@@ -165,17 +196,17 @@ MakeOCSPRequest(PLArenaPool* arena, const char* url, const SECItem* ocspRequest)
   }
 
   WriteOCSPRequestDataClosure closure({ arena, nullptr });
-  CURL* curl = curl_easy_init();
-  curl_easy_setopt(curl, CURLOPT_URL, url);
-  curl_easy_setopt(curl, CURLOPT_POSTFIELDS, ocspRequest->data);
-  curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, ocspRequest->len);
+  CURLWrapper curl(curl_easy_init());
+  curl_easy_setopt(curl.get(), CURLOPT_URL, url);
+  curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDS, ocspRequest);
+  curl_easy_setopt(curl.get(), CURLOPT_POSTFIELDSIZE, ocspRequestLength);
   mozilla::pkix::ScopedPtr<struct curl_slist, curl_slist_free_all>
     contentType(curl_slist_append(nullptr,
                                   "Content-Type: application/ocsp-request"));
-  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, contentType.get());
-  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteOCSPRequestData);
-  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &closure);
-  CURLcode res = curl_easy_perform(curl);
+  curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER, contentType.get());
+  curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, WriteOCSPRequestData);
+  curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &closure);
+  CURLcode res = curl_easy_perform(curl.get());
   if (res != CURLE_OK) {
     if (closure.currentData) {
       SECITEM_FreeItem(closure.currentData, true);
@@ -191,53 +222,117 @@ MakeOCSPRequest(PLArenaPool* arena, const char* url, const SECItem* ocspRequest)
   return nullptr;
 }
 
-SECStatus
-EVCheckerTrustDomain::CheckRevocation(EndEntityOrCA endEntityOrCA,
-                                      const CERTCertificate* cert,
-                            /*const*/ CERTCertificate* issuerCertToDup,
-                                      PRTime time,
-                         /*optional*/ const SECItem* stapledOCSPresponse)
+// Copied and modified from CERT_GetOCSPAuthorityInfoAccessLocation and
+// CERT_GetGeneralNameByType (and then copied from
+// GetOCSPAuthorityInfoAccessLocation in
+// security/certverifier/NSSCertDBTrustDomain.cpp. Returns SECFailure on error,
+// SECSuccess with url == nullptr when an OCSP URI was not found, and
+// SECSuccess with url != nullptr when an OCSP URI was found. The output url
+// will be owned by the arena.
+static Result
+GetOCSPAuthorityInfoAccessLocation(PLArenaPool* arena,
+                                   Input aiaExtension,
+                                   /*out*/ char const*& url)
 {
-  ScopedString aiaURL(CERT_GetOCSPAuthorityInfoAccessLocation(cert));
-  if (!aiaURL) {
-    PR_SetError(EV_CHECKER_NO_OCSP_AIA, 0);
-    return SECFailure;
+  url = nullptr;
+  SECItem aiaExtensionSECItem = UnsafeMapInputToSECItem(aiaExtension);
+  CERTAuthInfoAccess** aia =
+    CERT_DecodeAuthInfoAccessExtension(arena, &aiaExtensionSECItem);
+  if (!aia) {
+    return Result::ERROR_CERT_BAD_ACCESS_LOCATION;
+  }
+  for (size_t i = 0; aia[i]; ++i) {
+    if (SECOID_FindOIDTag(&aia[i]->method) == SEC_OID_PKIX_OCSP) {
+      // NSS chooses the **last** OCSP URL; we choose the **first**
+      CERTGeneralName* current = aia[i]->location;
+      if (!current) {
+        continue;
+      }
+      do {
+        if (current->type == certURI) {
+          const SECItem& location = current->name.other;
+          // (location.len + 1) must be small enough to fit into a uint32_t,
+          // but we limit it to a smaller bound to reduce OOM risk.
+          if (location.len > 1024 || memchr(location.data, 0, location.len)) {
+            // Reject embedded nulls. (NSS doesn't do this)
+            return Result::ERROR_CERT_BAD_ACCESS_LOCATION;
+          }
+          // Copy the non-null-terminated SECItem into a null-terminated string.
+          char* nullTerminatedURL(static_cast<char*>(
+                                    PORT_ArenaAlloc(arena, location.len + 1)));
+          if (!nullTerminatedURL) {
+            return Result::FATAL_ERROR_NO_MEMORY;
+          }
+          memcpy(nullTerminatedURL, location.data, location.len);
+          nullTerminatedURL[location.len] = 0;
+          url = nullTerminatedURL;
+          return Success;
+        }
+        current = CERT_GetNextGeneralName(current);
+      } while (current != aia[i]->location);
+    }
   }
 
-  ScopedPLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
-  if (!arena) {
-    return SECFailure;
-  }
-
-  SECItem* ocspRequest = CreateEncodedOCSPRequest(arena.get(), cert,
-                                                  issuerCertToDup);
-  if (!ocspRequest) {
-    return SECFailure;
-  }
-
-  SECItem* ocspResponse = MakeOCSPRequest(arena.get(), aiaURL.get(),
-                                          ocspRequest);
-  if (!ocspResponse) {
-    return SECFailure;
-  }
-
-  return VerifyEncodedOCSPResponse(*this, cert, issuerCertToDup, time, 10,
-                                   ocspResponse, nullptr, nullptr);
+  return Success;
 }
 
-SECStatus
-EVCheckerTrustDomain::IsChainValid(const CERTCertList* certChain)
+Result
+EVCheckerTrustDomain::CheckRevocation(EndEntityOrCA endEntityOrCA,
+                                      const CertID& certID, Time time,
+                                      const Input* stapledOCSPResponse,
+                                      const Input* aiaExtension)
 {
-  size_t chainLen = 0;
-  for (CERTCertListNode* node = CERT_LIST_HEAD(certChain);
-       !CERT_LIST_END(node, certChain);
-       node = CERT_LIST_NEXT(node)) {
-    chainLen++;
+  if (!aiaExtension) {
+    return Result::ERROR_UNKNOWN_ERROR;
   }
-  if (chainLen < 3) {
-    PR_SetError(EV_CHECKER_DIRECTLY_ISSUED_CERT, 0);
-    return SECFailure;
+  ScopedPLArenaPool arena(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
+  if (!arena) {
+    return Result::FATAL_ERROR_NO_MEMORY;
+  }
+  const char* url = nullptr; // owned by the arena
+  Result rv = GetOCSPAuthorityInfoAccessLocation(arena.get(), *aiaExtension, url);
+  if (rv != Success) {
+    return rv;
   }
 
-  return SECSuccess;
+  uint8_t ocspRequest[OCSP_REQUEST_MAX_LENGTH];
+  size_t ocspRequestLength;
+  rv = CreateEncodedOCSPRequest(*this, certID, ocspRequest, ocspRequestLength);
+  if (rv != Success) {
+    return rv;
+  }
+
+  SECItem* ocspResponse = MakeOCSPRequest(arena.get(), url, ocspRequest,
+                                          ocspRequestLength);
+  if (!ocspResponse) {
+    return Result::FATAL_ERROR_NO_MEMORY;
+  }
+  Input ocspResponseInput;
+  rv = ocspResponseInput.Init(ocspResponse->data, ocspResponse->len);
+  if (rv != Success) {
+    return rv;
+  }
+
+  // Bug 991815: The BR allow OCSP for intermediates to be up to one year old.
+  // Since this affects EV there is no reason why DV should be more strict
+  // so all intermediatates are allowed to have OCSP responses up to one year
+  // old.
+  uint16_t maxOCSPLifetimeInDays = 10;
+  if (endEntityOrCA == EndEntityOrCA::MustBeCA) {
+    maxOCSPLifetimeInDays = 365;
+  }
+
+  bool expired;
+  return VerifyEncodedOCSPResponse(*this, certID, time, maxOCSPLifetimeInDays,
+                                   ocspResponseInput, expired);
+}
+
+Result
+EVCheckerTrustDomain::IsChainValid(const DERArray& certChain)
+{
+  if (certChain.GetLength() < 3) {
+    return Result::ERROR_UNKNOWN_ERROR;
+  }
+
+  return Success;
 }

@@ -217,7 +217,7 @@ int main(int argc, char* argv[]) {
 
   RegisterEVCheckerErrors();
 
-  mozilla::pkix::ScopedCERTCertList certs(ReadCertsFromFile(certsFileName));
+  ScopedCERTCertList certs(ReadCertsFromFile(certsFileName));
   if (CERT_LIST_END(CERT_LIST_HEAD(certs), certs)) {
     std::cerr << "Couldn't read certificates from '" << certsFileName << "'";
     std::cerr << std::endl;
@@ -236,18 +236,25 @@ int main(int argc, char* argv[]) {
   if (trustDomain.Init(dottedOID, oidDescription) != SECSuccess) {
     return 1;
   }
-  mozilla::pkix::ScopedCERTCertList results;
+  ScopedCERTCertList results;
   mozilla::pkix::CertPolicyId evPolicy;
   if (trustDomain.GetFirstEVPolicyForCert(ee, evPolicy)
         != SECSuccess) {
     PrintPRError("GetFirstEVPolicyForCert failed");
     return 1;
   }
-  SECStatus rv = BuildCertChain(trustDomain, ee, PR_Now(),
-                   mozilla::pkix::EndEntityOrCA::MustBeEndEntity, 0,
-                   mozilla::pkix::KeyPurposeId::anyExtendedKeyUsage,
-                   evPolicy, nullptr, results);
-  if (rv != SECSuccess) {
+  mozilla::pkix::Input eeInput;
+  mozilla::pkix::Result rv = eeInput.Init(ee->derCert.data, ee->derCert.len);
+  if (rv != mozilla::pkix::Success) {
+    std::cerr << "Couldn't initialize Input from ee cert" << std::endl;
+    return 1;
+  }
+  rv = BuildCertChain(trustDomain, eeInput, mozilla::pkix::Now(),
+                      mozilla::pkix::EndEntityOrCA::MustBeEndEntity,
+                      mozilla::pkix::KeyUsage::noParticularKeyUsageRequired,
+                      mozilla::pkix::KeyPurposeId::anyExtendedKeyUsage,
+                      evPolicy, nullptr);
+  if (rv != mozilla::pkix::Success) {
     PrintPRError("BuildCertChain failed");
     PrintPRErrorString();
     return 1;

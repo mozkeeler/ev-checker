@@ -13,6 +13,11 @@ function handleFile(response, filename) {
   response.end(fs.readFileSync(filename ? filename : "index.html"));
 }
 
+function log(message) {
+  var timeString = (new Date()).toString();
+  console.log(timeString + ": " + message);
+}
+
 function runChecker(host, port, rootPEM, oid, description, continuation) {
   var minimumHTTPRequest = "GET / HTTP/1.0\r\n\r\n";
   var command = "echo -n '" + minimumHTTPRequest + "' |" +
@@ -21,9 +26,11 @@ function runChecker(host, port, rootPEM, oid, description, continuation) {
                 "echo -n '" + rootPEM + "' >> /tmp/certs.pem && " +
                 "./ev-checker -c /tmp/certs.pem -o " + oid + " -d '" +
                 description + "'";
+  log("runChecker: attempting command '" + command + "'");
   exec(command, function(error, stdout, stderr) {
     if (error) {
-      console.log("runChecker: " + error);
+      log("runChecker: " + error);
+      log("runChecker (stderr): " + stderr);
       continuation(error.toString());
     } else {
       continuation(stdout);
@@ -65,7 +72,7 @@ function handleRunChecker(request, response) {
   var form = new formidable.IncomingForm();
   form.parse(request, function(err, fields, files) {
     if (err) {
-      console.log("handleRunChecker: " + err);
+      log("handleRunChecker: " + err);
       response.writeHead(500);
       response.end();
       return;

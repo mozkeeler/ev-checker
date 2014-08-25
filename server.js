@@ -13,9 +13,11 @@ function handleFile(response, filename) {
   response.end(fs.readFileSync(filename ? filename : "index.html"));
 }
 
-function runChecker(host, rootPEM, oid, description, continuation) {
-  var command = "gnutls-cli --print-cert " + host + " < /dev/null " +
-                "2> /dev/null > /tmp/certs.pem && " +
+function runChecker(host, port, rootPEM, oid, description, continuation) {
+  var minimumHTTPRequest = "GET / HTTP/1.0\r\n\r\n";
+  var command = "echo -n '" + minimumHTTPRequest + "' |" +
+                "gnutls-cli --print-cert " + host + " -p " + port +
+                " 2> /dev/null > /tmp/certs.pem && " +
                 "echo -n '" + rootPEM + "' >> /tmp/certs.pem && " +
                 "./ev-checker -c /tmp/certs.pem -o " + oid + " -d '" +
                 description + "'";
@@ -33,7 +35,9 @@ function validateHost(hostField) {
   if (!hostField) {
     return null;
   }
-  return url.parse("https://" + hostField).host;
+  var parsed = url.parse("https://" + hostField);
+  return { host: parsed.hostname,
+           port: parsed.port };
 }
 
 function validatePEM(rootPEMContents) {
@@ -65,21 +69,23 @@ function handleRunChecker(request, response) {
       return;
     }
 
-    var host = validateHost(fields['host']);
+    var hostandport = validateHost(fields['host']);
     var rootPEM = validatePEM(fs.readFileSync(files['rootPEM'].path));
     var oid = validateOID(fields['oid']);
     var description = validateDescription(fields['description']);
-    if (!host || !rootPEM || !oid || !description) {
+    if (!hostandport || !rootPEM || !oid || !description) {
       response.writeHead(200);
       response.end("Validation of input parameters failed.");
       return;
     }
-    runChecker(host, rootPEM, oid, description, function(result) {
-      response.writeHead(200, {
-        'Content-Type': 'test/plain'
-      });
-      response.end(result);
-    });
+    runChecker(hostandport.host, hostandport.port, rootPEM, oid, description,
+      function(result) {
+        response.writeHead(200, {
+          'Content-Type': 'test/plain'
+        });
+        response.end(result);
+      }
+    );
   });
 }
 

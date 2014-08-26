@@ -19,10 +19,10 @@ function log(message) {
 }
 
 function runChecker(host, port, rootPEM, oid, description, continuation) {
-  var minimumHTTPRequest = "GET / HTTP/1.0\r\n\r\n";
+  var minimumHTTPRequest = "GET / HTTP/1.0\\r\\n\\r\\n";
   var command = "echo -n '" + minimumHTTPRequest + "' |" +
-                "gnutls-cli --print-cert " + host + " -p " + port +
-                " 2> /dev/null > /tmp/certs.pem && " +
+                "gnutls-cli --no-ca-verification --print-cert " + host +
+                " -p " + port + " 2> /dev/null > /tmp/certs.pem && " +
                 "echo -n '" + rootPEM + "' >> /tmp/certs.pem && " +
                 "./ev-checker -c /tmp/certs.pem -o " + oid + " -d '" +
                 description + "'";
@@ -46,7 +46,7 @@ function validateHost(hostField) {
                          ? hostField
                          : "https://" + hostField);
   return { host: parsed.hostname,
-           port: parsed.port };
+           port: parsed.port ? parsed.port : "443" };
 }
 
 function validatePEM(rootPEMContents) {
@@ -84,7 +84,12 @@ function handleRunChecker(request, response) {
     var description = validateDescription(fields['description']);
     if (!hostandport || !rootPEM || !oid || !description) {
       response.writeHead(200);
-      response.end("Validation of input parameters failed.");
+      var message = "Validation of input parameters failed.";
+      if (!hostandport) message += "\n(bad test URL)";
+      if (!rootPEM) message += "\n(bad root certificate - it should be in PEM format)";
+      if (!oid) message += "\n(bad OID)";
+      if (!description) message += "\n(description contained invalid input)";
+      response.end(message);
       return;
     }
     runChecker(hostandport.host, hostandport.port, rootPEM, oid, description,

@@ -24,7 +24,7 @@
     </div>
     <div class="labelInputPair">
       <label for="description">Description:</label>
-      <input type="text" name="description">
+      <input type="text" name="description" id="description">
     </div>
     <div class="labelInputPair">
       <input type="submit" value="Run Checker" onclick="sendForm(event);">
@@ -35,6 +35,9 @@
   </div>
   <script>
     function sendForm(evt) {
+      var description = document.getElementById("description").value;
+      var resultArea = document.getElementById("result");
+      resultArea.textContent = "Test in progress for '" + description + "'...";
       evt.preventDefault();
       var form = document.getElementById("form");
       var formData = new FormData(form);
@@ -42,7 +45,6 @@
       req.open("POST", "/run-checker", true);
       req.onreadystatechange = function(evt) {
         if (req.readyState == 4) {
-          var resultArea = document.getElementById("result");
           resultArea.textContent = req.responseText;
         }
       };

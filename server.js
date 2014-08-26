@@ -21,8 +21,8 @@ function log(message) {
 function runChecker(host, port, rootPEM, oid, description, continuation) {
   var minimumHTTPRequest = "GET / HTTP/1.0\\r\\n\\r\\n";
   var command = "echo -n '" + minimumHTTPRequest + "' |" +
-                "gnutls-cli --no-ca-verification --print-cert " + host +
-                " -p " + port + " 2> /dev/null > /tmp/certs.pem && " +
+                "gnutls-cli --insecure --print-cert " + host +
+                " -p " + port + " > /tmp/certs.pem && " +
                 "echo -n '" + rootPEM + "' >> /tmp/certs.pem && " +
                 "./ev-checker -c /tmp/certs.pem -o " + oid + " -d '" +
                 description + "'";

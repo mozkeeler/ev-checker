@@ -18,24 +18,22 @@ function log(message) {
   console.log(timeString + ": " + message);
 }
 
-function runChecker(host, port, rootPEM, oid, description, continuation) {
+// continuation: function(error, stdout, stderr)
+function downloadCerts(host, port, continuation) {
   var minimumHTTPRequest = "GET / HTTP/1.0\\r\\n\\r\\n";
   var command = "echo -n '" + minimumHTTPRequest + "' |" +
                 "gnutls-cli --insecure --print-cert " + host +
-                " -p " + port + " > /tmp/certs.pem && " +
-                "echo -n '" + rootPEM + "' >> /tmp/certs.pem && " +
+                " -p " + port + " > /tmp/certs.pem";
+  log("downloadCerts: attempting command '" + command + "'");
+  exec(command, continuation);
+}
+
+function runChecker(host, port, rootPEM, oid, description, continuation) {
+  var command = "echo -n '" + rootPEM + "' >> /tmp/certs.pem && " +
                 "./ev-checker -c /tmp/certs.pem -o " + oid + " -d '" +
                 description + "'";
   log("runChecker: attempting command '" + command + "'");
-  exec(command, function(error, stdout, stderr) {
-    if (error) {
-      log("runChecker: " + error);
-      log("runChecker (stderr): " + stderr);
-      continuation(error.toString());
-    } else {
-      continuation(stdout);
-    }
-  });
+  exec(command, continuation);
 }
 
 function validateHost(hostField) {
@@ -78,26 +76,46 @@ function handleRunChecker(request, response) {
       return;
     }
 
-    var hostandport = validateHost(fields['host']);
+    var hostport = validateHost(fields['host']);
     var rootPEM = validatePEM(fs.readFileSync(files['rootPEM'].path));
     var oid = validateOID(fields['oid']);
     var description = validateDescription(fields['description']);
-    if (!hostandport || !rootPEM || !oid || !description) {
+    if (!hostport || !rootPEM || !oid || !description) {
       response.writeHead(200);
       var message = "Validation of input parameters failed.";
-      if (!hostandport) message += "\n(bad test URL)";
+      if (!hostport) message += "\n(bad test URL)";
       if (!rootPEM) message += "\n(bad root certificate - it should be in PEM format)";
       if (!oid) message += "\n(bad OID)";
       if (!description) message += "\n(description contained invalid input)";
       response.end(message);
       return;
     }
-    runChecker(hostandport.host, hostandport.port, rootPEM, oid, description,
-      function(result) {
-        response.writeHead(200, {
-          'Content-Type': 'test/plain'
-        });
-        response.end(result);
+    downloadCerts(hostport.host, hostport.port,
+      function(error, stdout, stderr) {
+        if (error) {
+          response.writeHead(200, { 'Content-Type': 'test/plain' });
+          response.end("Downloading certificates from '" + hostport.host +
+                       ":" + hostport.port + "' failed. The server may " +
+                       "be down or inaccessible from this host.\n" +
+                       "Extra debugging output:\n" +
+                       stderr);
+          return;
+        }
+        runChecker(hostport.host, hostport.port, rootPEM, oid, description,
+          function(error, stdout, stderr) {
+            if (error) {
+              response.writeHead(200, { 'Content-Type': 'test/plain' });
+              response.end("Verifying the certificate at '" + hostport.host +
+                           ":" + hostport.port + "' failed. The following " +
+                           "additional output may be informative:\n" +
+                           stderr);
+              return;
+            }
+            response.writeHead(200, { 'Content-Type': 'test/plain' });
+            response.end(stdout);
+            return;
+          }
+        );
       }
     );
   });

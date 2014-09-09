@@ -241,6 +241,8 @@ int main(int argc, char* argv[]) {
   if (trustDomain.GetFirstEVPolicyForCert(ee, evPolicy)
         != SECSuccess) {
     PrintPRError("GetFirstEVPolicyForCert failed");
+    std::cerr << "This may mean that the specified EV Policy OID was not ";
+    std::cerr << "found in the end-entity certificate." << std::endl;
     return 1;
   }
   mozilla::pkix::Input eeInput;
@@ -258,6 +260,16 @@ int main(int argc, char* argv[]) {
     PR_SetError(mozilla::pkix::MapResultToPRErrorCode(rv), 0);
     PrintPRError("BuildCertChain failed");
     PrintPRErrorString();
+    if (rv == mozilla::pkix::Result::ERROR_POLICY_VALIDATION_FAILED) {
+      std::cerr << "It appears be the case that the end-entity certificate ";
+      std::cerr << "was issued directly by the root. There should be at ";
+      std::cerr << "least one intermediate in the certificate issuance chain.";
+      std::cerr << std::endl;
+    } else if (rv == mozilla::pkix::Result::ERROR_CERT_BAD_ACCESS_LOCATION) {
+      std::cerr << "It appears to be the case that a certificate in the ";
+      std::cerr << "issuance chain has a malformed or missing OCSP AIA URI";
+      std::cerr << std::endl;
+    }
     return 1;
   }
 

@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include <curl/curl.h>
+#include <iostream>
 
 #include "EVCheckerTrustDomain.h"
 
@@ -227,6 +228,8 @@ MakeOCSPRequest(PLArenaPool* arena, const char* url, const uint8_t* ocspRequest,
   }
   res = curl_easy_perform(curl.get());
   if (res != CURLE_OK) {
+    std::cerr << "Error making OCSP request to '" << url << "': ";
+    std::cerr << curl_easy_strerror(res) << std::endl;
     return Result::ERROR_OCSP_SERVER_ERROR;
   }
   if (closure.currentData) {

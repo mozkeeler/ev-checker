@@ -47,7 +47,11 @@ function validateHost(hostField) {
            port: parsed.port ? parsed.port : "443" };
 }
 
-function validatePEM(rootPEMContents) {
+function validatePEM(rootPEMFile) {
+  if (!rootPEMFile) {
+    return null;
+  }
+  var rootPEMContents = fs.readFileSync(rootPEMFile.path);
   if (!rootPEMContents) {
     return null;
   }
@@ -77,7 +81,7 @@ function handleRunChecker(request, response) {
     }
 
     var hostport = validateHost(fields['host']);
-    var rootPEM = validatePEM(fs.readFileSync(files['rootPEM'].path));
+    var rootPEM = validatePEM(files['rootPEM']);
     var oid = validateOID(fields['oid']);
     var description = validateDescription(fields['description']);
     if (!hostport || !rootPEM || !oid || !description) {

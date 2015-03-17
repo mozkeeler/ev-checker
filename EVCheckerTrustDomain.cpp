@@ -346,7 +346,7 @@ EVCheckerTrustDomain::CheckRevocation(EndEntityOrCA endEntityOrCA,
 }
 
 Result
-EVCheckerTrustDomain::IsChainValid(const DERArray& certChain)
+EVCheckerTrustDomain::IsChainValid(const DERArray& certChain, Time)
 {
   if (certChain.GetLength() < 3) {
     return Result::ERROR_POLICY_VALIDATION_FAILED;

@@ -24,9 +24,8 @@
 
 #include <functional>
 #include <vector>
-#include <gtest/gtest.h>
+#include "pkixgtest.h"
 
-#include "pkix/bind.h"
 #include "pkixder.h"
 
 using namespace mozilla::pkix;
@@ -85,6 +84,8 @@ const uint8_t DER_INT16[] = {
   0x02,                       // length
   0x12, 0x34                  // 0x1234
 };
+
+static const Input EMPTY_INPUT;
 
 TEST_F(pkixder_input_tests, InputInit)
 {
@@ -260,7 +261,7 @@ TEST_F(pkixder_input_tests, ReadWordWrapAroundPointer)
   ASSERT_EQ(Result::ERROR_BAD_DER, input.Read(b));
 }
 
-TEST_F(pkixder_input_tests, InputSkip)
+TEST_F(pkixder_input_tests, Skip)
 {
   const uint8_t der[] = { 0x11, 0x22, 0x33, 0x44 };
   Input buf(der);
@@ -279,7 +280,7 @@ TEST_F(pkixder_input_tests, InputSkip)
   ASSERT_EQ(0x44, readByte2);
 }
 
-TEST_F(pkixder_input_tests, InputSkipToEnd)
+TEST_F(pkixder_input_tests, Skip_ToEnd)
 {
   const uint8_t der[] = { 0x11, 0x22, 0x33, 0x44 };
   Input buf(der);
@@ -288,7 +289,7 @@ TEST_F(pkixder_input_tests, InputSkipToEnd)
   ASSERT_TRUE(input.AtEnd());
 }
 
-TEST_F(pkixder_input_tests, InputSkipPastEnd)
+TEST_F(pkixder_input_tests, Skip_PastEnd)
 {
   const uint8_t der[] = { 0x11, 0x22, 0x33, 0x44 };
   Input buf(der);
@@ -297,7 +298,7 @@ TEST_F(pkixder_input_tests, InputSkipPastEnd)
   ASSERT_EQ(Result::ERROR_BAD_DER, input.Skip(sizeof der + 1));
 }
 
-TEST_F(pkixder_input_tests, InputSkipToNewInput)
+TEST_F(pkixder_input_tests, Skip_ToNewInput)
 {
   const uint8_t der[] = { 0x01, 0x02, 0x03, 0x04 };
   Input buf(der);
@@ -324,7 +325,7 @@ TEST_F(pkixder_input_tests, InputSkipToNewInput)
   ASSERT_TRUE(skippedInput.AtEnd());
 }
 
-TEST_F(pkixder_input_tests, InputSkipToNewInputPastEnd)
+TEST_F(pkixder_input_tests, Skip_ToNewInputPastEnd)
 {
   const uint8_t der[] = { 0x11, 0x22, 0x33, 0x44 };
   Input buf(der);
@@ -334,7 +335,7 @@ TEST_F(pkixder_input_tests, InputSkipToNewInputPastEnd)
   ASSERT_EQ(Result::ERROR_BAD_DER, input.Skip(sizeof der * 2, skippedInput));
 }
 
-TEST_F(pkixder_input_tests, InputSkipToInput)
+TEST_F(pkixder_input_tests, Skip_ToInput)
 {
   const uint8_t der[] = { 0x11, 0x22, 0x33, 0x44 };
   Input buf(der);
@@ -349,7 +350,7 @@ TEST_F(pkixder_input_tests, InputSkipToInput)
   ASSERT_TRUE(InputsAreEqual(expected, item));
 }
 
-TEST_F(pkixder_input_tests, SkipWrapAroundPointer)
+TEST_F(pkixder_input_tests, Skip_WrapAroundPointer)
 {
   // The original implementation of our buffer read overflow checks was
   // susceptible to integer overflows which could make the checks ineffective.
@@ -365,7 +366,7 @@ TEST_F(pkixder_input_tests, SkipWrapAroundPointer)
   ASSERT_EQ(Result::ERROR_BAD_DER, input.Skip(1));
 }
 
-TEST_F(pkixder_input_tests, SkipToInputPastEnd)
+TEST_F(pkixder_input_tests, Skip_ToInputPastEnd)
 {
   const uint8_t der[] = { 0x11, 0x22, 0x33, 0x44 };
   Input buf(der);
@@ -373,6 +374,30 @@ TEST_F(pkixder_input_tests, SkipToInputPastEnd)
 
   Input skipped;
   ASSERT_EQ(Result::ERROR_BAD_DER, input.Skip(sizeof der + 1, skipped));
+}
+
+TEST_F(pkixder_input_tests, SkipToEnd_ToInput)
+{
+  static const uint8_t der[] = { 0x11, 0x22, 0x33, 0x44 };
+  Input buf(der);
+  Reader input(buf);
+
+  Input skipped;
+  ASSERT_EQ(Success, input.SkipToEnd(skipped));
+}
+
+TEST_F(pkixder_input_tests, SkipToEnd_ToInput_InputAlreadyInited)
+{
+  static const uint8_t der[] = { 0x11, 0x22, 0x33, 0x44 };
+  Input buf(der);
+  Reader input(buf);
+
+  static const uint8_t initialValue[] = { 0x01, 0x02, 0x03 };
+  Input x(initialValue);
+  // Fails because skipped was already initialized once, and Inputs are not
+  // allowed to be Init()d multiple times.
+  ASSERT_EQ(Result::FATAL_ERROR_INVALID_ARGS, input.SkipToEnd(x));
+  ASSERT_TRUE(InputsAreEqual(x, Input(initialValue)));
 }
 
 TEST_F(pkixder_input_tests, ExpectTagAndSkipValue)
@@ -442,7 +467,7 @@ TEST_F(pkixder_input_tests, MarkAndGetInput)
 }
 
 // Cannot run this test on debug builds because of the NotReached
-#ifndef DEBUG
+#ifdef NDEBUG
 TEST_F(pkixder_input_tests, MarkAndGetInputDifferentInput)
 {
   const uint8_t der[] = { 0x11, 0x22, 0x33, 0x44 };
@@ -459,64 +484,138 @@ TEST_F(pkixder_input_tests, MarkAndGetInputDifferentInput)
 }
 #endif
 
-TEST_F(pkixder_input_tests, ExpectTagAndLength)
+TEST_F(pkixder_input_tests, ReadTagAndGetValue_Input_AtEnd)
 {
-  Input buf(DER_SEQUENCE_OF_INT8);
-  Reader input(buf);
-
-  ASSERT_EQ(Success, ExpectTagAndLength(input, SEQUENCE,
-                                        sizeof DER_SEQUENCE_OF_INT8 - 2));
+  Reader input(EMPTY_INPUT);
+  uint8_t tag;
+  Input value;
+  ASSERT_EQ(Result::ERROR_BAD_DER, ReadTagAndGetValue(input, tag, value));
 }
 
-TEST_F(pkixder_input_tests, ExpectTagAndLengthWithWrongLength)
+TEST_F(pkixder_input_tests, ReadTagAndGetValue_Input_TruncatedAfterTag)
 {
-  Input buf(DER_INT16);
+  static const uint8_t DER[] = { SEQUENCE };
+  Input buf(DER);
   Reader input(buf);
-
-  // Wrong length
-  ASSERT_EQ(Result::ERROR_BAD_DER, ExpectTagAndLength(input, INTEGER, 4));
+  uint8_t tag;
+  Input value;
+  ASSERT_EQ(Result::ERROR_BAD_DER, ReadTagAndGetValue(input, tag, value));
 }
 
-TEST_F(pkixder_input_tests, ExpectTagAndLengthWithWrongTag)
+TEST_F(pkixder_input_tests, ReadTagAndGetValue_Input_ValidEmpty)
 {
-  Input buf(DER_INT16);
+  Input buf(DER_SEQUENCE_EMPTY);
   Reader input(buf);
-
-  // Wrong type
-  ASSERT_EQ(Result::ERROR_BAD_DER, ExpectTagAndLength(input, OCTET_STRING, 2));
-}
-
-TEST_F(pkixder_input_tests, ExpectTagAndGetLength)
-{
-  Input buf(DER_SEQUENCE_OF_INT8);
-  Reader input(buf);
-
-  uint16_t length = 0;
-  ASSERT_EQ(Success,
-            der::internal::ExpectTagAndGetLength(input, SEQUENCE, length));
-  ASSERT_EQ(sizeof DER_SEQUENCE_OF_INT8 - 2, length);
-  ASSERT_EQ(Success, input.Skip(length));
+  uint8_t tag = 0;
+  Input value;
+  ASSERT_EQ(Success, ReadTagAndGetValue(input, tag, value));
+  ASSERT_EQ(SEQUENCE, tag);
+  ASSERT_EQ(0u, value.GetLength());
   ASSERT_TRUE(input.AtEnd());
 }
 
-TEST_F(pkixder_input_tests, ExpectTagAndGetLengthWithWrongTag)
+TEST_F(pkixder_input_tests, ReadTagAndGetValue_Input_ValidNotEmpty)
 {
-  Input buf(DER_SEQUENCE_OF_INT8);
+  Input buf(DER_SEQUENCE_NOT_EMPTY);
   Reader input(buf);
-
-  uint16_t length = 0;
-  ASSERT_EQ(Result::ERROR_BAD_DER,
-            der::internal::ExpectTagAndGetLength(input, INTEGER, length));
+  uint8_t tag = 0;
+  Input value;
+  ASSERT_EQ(Success, ReadTagAndGetValue(input, tag, value));
+  ASSERT_EQ(SEQUENCE, tag);
+  Input expected(DER_SEQUENCE_NOT_EMPTY_VALUE);
+  ASSERT_TRUE(InputsAreEqual(expected, value));
+  ASSERT_TRUE(input.AtEnd());
 }
 
-TEST_F(pkixder_input_tests, ExpectTagAndGetLengthWithWrongLength)
+TEST_F(pkixder_input_tests,
+       ReadTagAndGetValue_Input_InvalidNotEmptyValueTruncated)
+{
+  Input buf(DER_SEQUENCE_NOT_EMPTY_VALUE_TRUNCATED);
+  Reader input(buf);
+  uint8_t tag;
+  Input value;
+  ASSERT_EQ(Result::ERROR_BAD_DER, ReadTagAndGetValue(input, tag, value));
+}
+
+TEST_F(pkixder_input_tests, ReadTagAndGetValue_Input_InvalidWrongLength)
 {
   Input buf(DER_TRUNCATED_SEQUENCE_OF_INT8);
   Reader input(buf);
-
-  uint16_t length = 0;
+  uint8_t tag;
+  Input value;
   ASSERT_EQ(Result::ERROR_BAD_DER,
-            der::internal::ExpectTagAndGetLength(input, SEQUENCE, length));
+            ReadTagAndGetValue(input, tag, value));
+}
+
+TEST_F(pkixder_input_tests, ReadTagAndGetValue_Input_InvalidHighTagNumberForm1)
+{
+  // High tag number form is not allowed (illegal 1 byte tag)
+  //
+  // If the decoder treats 0x1F as a valid low tag number tag, then it will
+  // treat the actual tag (1) as a length, and then it will return Success
+  // with value == { 0x00 } and tag == 0x1f.
+  //
+  // It is illegal to encode tag 1 in the high tag number form because it isn't
+  // the shortest encoding (the low tag number form is).
+  static const uint8_t DER[] = {
+    0x1F, // high tag number form indicator
+    1,    // tag 1 (not legal!)
+    0     // length zero
+  };
+  Input buf(DER);
+  Reader input(buf);
+  uint8_t tag;
+  Input value;
+  ASSERT_EQ(Result::ERROR_BAD_DER,
+            ReadTagAndGetValue(input, tag, value));
+}
+
+TEST_F(pkixder_input_tests, ReadTagAndGetValue_Input_InvalidHighTagNumberForm2)
+{
+  // High tag number form is not allowed (legal 1 byte tag).
+  //
+  // ReadTagAndGetValue's check to prohibit the high tag number form has no
+  // effect on whether this test passes or fails, because ReadTagAndGetValue
+  // will interpret the second byte (31) as a length, and the input doesn't
+  // have 31 bytes following it. This test is here to guard against the case
+  // where somebody actually implements high tag number form parsing, to remind
+  // that person that they need to add tests here, including in particular
+  // tests for overly-long encodings.
+  static const uint8_t DER[] = {
+    0x1F, // high tag number form indicator
+    31,   // tag 31
+    0     // length zero
+  };
+  Input buf(DER);
+  Reader input(buf);
+  uint8_t tag;
+  Input value;
+  ASSERT_EQ(Result::ERROR_BAD_DER,
+            ReadTagAndGetValue(input, tag, value));
+}
+
+TEST_F(pkixder_input_tests, ReadTagAndGetValue_Input_InvalidHighTagNumberForm3)
+{
+  // High tag number form is not allowed (2 byte legal tag)
+  //
+  // ReadTagAndGetValue's check to prohibit the high tag number form has no
+  // effect on whether this test passes or fails, because ReadTagAndGetValue
+  // will interpret the second byte as a length, and the input doesn't have
+  // that many bytes following it. This test is here to guard against the case
+  // where somebody actually implements high tag number form parsing, to remind
+  // that person that they need to add tests here, including in particular
+  // tests for overly-long encodings.
+  static const uint8_t DER[] = {
+    0x1F,              // high tag number form indicator
+    0x80 | 0x01, 0x00, // tag 0x100 (256)
+    0                  // length zero
+  };
+  Input buf(DER);
+  Reader input(buf);
+  uint8_t tag;
+  Input value;
+  ASSERT_EQ(Result::ERROR_BAD_DER,
+            ReadTagAndGetValue(input, tag, value));
 }
 
 TEST_F(pkixder_input_tests, ExpectTagAndGetValue_Reader_ValidEmpty)
@@ -558,7 +657,7 @@ TEST_F(pkixder_input_tests, ExpectTagAndGetValue_Reader_InvalidWrongLength)
             ExpectTagAndGetValue(input, SEQUENCE, value));
 }
 
-TEST_F(pkixder_input_tests, ExpectTagAndGetLength_Reader_InvalidWrongTag)
+TEST_F(pkixder_input_tests, ExpectTagAndGetValue_Reader_InvalidWrongTag)
 {
   Input buf(DER_SEQUENCE_NOT_EMPTY);
   Reader input(buf);
@@ -607,13 +706,50 @@ TEST_F(pkixder_input_tests, ExpectTagAndGetValue_Input_InvalidWrongLength)
             ExpectTagAndGetValue(input, SEQUENCE, value));
 }
 
-TEST_F(pkixder_input_tests, ExpectTagAndGetLength_Input_InvalidWrongTag)
+TEST_F(pkixder_input_tests, ExpectTagAndGetValue_Input_InvalidWrongTag)
 {
   Input buf(DER_SEQUENCE_NOT_EMPTY);
   Reader input(buf);
   Input value;
   ASSERT_EQ(Result::ERROR_BAD_DER,
             ExpectTagAndGetValue(input, INTEGER, value));
+}
+
+TEST_F(pkixder_input_tests, ExpectTagAndEmptyValue_ValidEmpty)
+{
+  Input buf(DER_SEQUENCE_EMPTY);
+  Reader input(buf);
+  ASSERT_EQ(Success, ExpectTagAndEmptyValue(input, SEQUENCE));
+  ASSERT_TRUE(input.AtEnd());
+}
+
+TEST_F(pkixder_input_tests, ExpectTagAndEmptyValue_InValidNotEmpty)
+{
+  Input buf(DER_SEQUENCE_NOT_EMPTY);
+  Reader input(buf);
+  ASSERT_EQ(Result::ERROR_BAD_DER, ExpectTagAndEmptyValue(input, SEQUENCE));
+}
+
+TEST_F(pkixder_input_tests,
+       ExpectTagAndEmptyValue_Input_InvalidNotEmptyValueTruncated)
+{
+  Input buf(DER_SEQUENCE_NOT_EMPTY_VALUE_TRUNCATED);
+  Reader input(buf);
+  ASSERT_EQ(Result::ERROR_BAD_DER, ExpectTagAndEmptyValue(input, SEQUENCE));
+}
+
+TEST_F(pkixder_input_tests, ExpectTagAndEmptyValue_InvalidWrongLength)
+{
+  Input buf(DER_TRUNCATED_SEQUENCE_OF_INT8);
+  Reader input(buf);
+  ASSERT_EQ(Result::ERROR_BAD_DER, ExpectTagAndEmptyValue(input, SEQUENCE));
+}
+
+TEST_F(pkixder_input_tests, ExpectTagAndEmptyValue_InvalidWrongTag)
+{
+  Input buf(DER_SEQUENCE_NOT_EMPTY);
+  Reader input(buf);
+  ASSERT_EQ(Result::ERROR_BAD_DER, ExpectTagAndEmptyValue(input, INTEGER));
 }
 
 TEST_F(pkixder_input_tests, ExpectTagAndGetTLV_Input_ValidEmpty)
@@ -707,10 +843,11 @@ TEST_F(pkixder_input_tests, NestedOf)
 
   std::vector<uint8_t> readValues;
   ASSERT_EQ(Success,
-    NestedOf(input, SEQUENCE, INTEGER, EmptyAllowed::No,
-             mozilla::pkix::bind(NestedOfHelper, mozilla::pkix::_1,
-                                 mozilla::pkix::ref(readValues))));
-  ASSERT_EQ((size_t) 3, readValues.size());
+            NestedOf(input, SEQUENCE, INTEGER, EmptyAllowed::No,
+                     [&readValues](Reader& r) {
+                       return NestedOfHelper(r, readValues);
+                     }));
+  ASSERT_EQ(3u, readValues.size());
   ASSERT_EQ(0x01, readValues[0]);
   ASSERT_EQ(0x02, readValues[1]);
   ASSERT_EQ(0x03, readValues[2]);
@@ -725,9 +862,10 @@ TEST_F(pkixder_input_tests, NestedOfWithTruncatedData)
   std::vector<uint8_t> readValues;
   ASSERT_EQ(Result::ERROR_BAD_DER,
             NestedOf(input, SEQUENCE, INTEGER, EmptyAllowed::No,
-                     mozilla::pkix::bind(NestedOfHelper, mozilla::pkix::_1,
-                                         mozilla::pkix::ref(readValues))));
-  ASSERT_EQ((size_t) 0, readValues.size());
+                     [&readValues](Reader& r) {
+                       return NestedOfHelper(r, readValues);
+                     }));
+  ASSERT_EQ(0u, readValues.size());
 }
 
 TEST_F(pkixder_input_tests, MatchRestAtEnd)

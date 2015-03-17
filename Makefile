@@ -7,9 +7,10 @@ CFLAGS=-Ipkix/include -I/usr/include/nspr4 -I/usr/include/nss3 \
 	-I/usr/local/include/nspr -I/usr/local/include/nss -g -Wall -c \
 	-std=c++11
 LDFLAGS=-lnss3 -lnssutil3 -lnspr4 -lplc4 -lcurl -Wl,-L/usr/local/lib
-SOURCES=pkix/lib/pkixbind.cpp pkix/lib/pkixbuild.cpp pkix/lib/pkixcert.cpp \
-	pkix/lib/pkixcheck.cpp pkix/lib/pkixder.cpp pkix/lib/pkixnss.cpp \
-	pkix/lib/pkixocsp.cpp pkix/lib/pkixtime.cpp ev-checker.cpp \
+SOURCES=pkix/lib/pkixbuild.cpp pkix/lib/pkixcert.cpp pkix/lib/pkixcheck.cpp \
+	pkix/lib/pkixder.cpp pkix/lib/pkixnames.cpp pkix/lib/pkixnss.cpp \
+	pkix/lib/pkixocsp.cpp pkix/lib/pkixresult.cpp pkix/lib/pkixtime.cpp \
+	pkix/lib/pkixverify.cpp ev-checker.cpp \
 	EVCheckerTrustDomain.cpp Util.cpp
 OBJECTS=$(SOURCES:.cpp=.o)
 EXECUTABLE=ev-checker

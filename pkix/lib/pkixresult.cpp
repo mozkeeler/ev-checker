@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/*- *- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This code is made available to you under your choice of the following sets
  * of licensing terms:
@@ -22,16 +22,25 @@
  * limitations under the License.
  */
 
-#include "pkix/bind.h"
-
-#ifndef MOZILLA_PKIX_USE_REAL_FUNCTIONAL
+#include "pkix/Result.h"
+#include "pkixutil.h"
 
 namespace mozilla { namespace pkix {
 
-Placeholder1 _1;
-Placeholder2 _2;
-Placeholder3 _3;
+const char*
+MapResultToName(Result result)
+{
+  switch (result)
+  {
+#define MOZILLA_PKIX_MAP(mozilla_pkix_result, value, nss_result) \
+    case Result::mozilla_pkix_result: return "Result::" #mozilla_pkix_result;
+
+    MOZILLA_PKIX_MAP_LIST
+
+#undef MOZILLA_PKIX_MAP
+
+    MOZILLA_PKIX_UNREACHABLE_DEFAULT_ENUM
+  }
+}
 
 } } // namespace mozilla::pkix
-
-#endif

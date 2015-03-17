@@ -38,24 +38,52 @@ public:
                                         const mozilla::pkix::Input* stapledOCSPResponse,
                                         const mozilla::pkix::Input* aiaExtension);
 
-  mozilla::pkix::Result IsChainValid(const mozilla::pkix::DERArray& certChain);
+  mozilla::pkix::Result IsChainValid(const mozilla::pkix::DERArray& certChain,
+                                     mozilla::pkix::Time time);
 
-  mozilla::pkix::Result CheckPublicKey(mozilla::pkix::Input subjectPublicKeyInfo)
+  mozilla::pkix::Result VerifyRSAPKCS1SignedDigest(
+    const mozilla::pkix::SignedDigest& signedDigest,
+    mozilla::pkix::Input subjectPublicKeyInfo)
   {
-    return ::mozilla::pkix::CheckPublicKey(subjectPublicKeyInfo);
-  }
-
-  mozilla::pkix::Result VerifySignedData(const mozilla::pkix::SignedDataWithSignature& signedData,
-                                         mozilla::pkix::Input subjectPublicKeyInfo)
-  {
-    return mozilla::pkix::VerifySignedData(signedData, subjectPublicKeyInfo,
-                                           nullptr);
+    return mozilla::pkix::VerifyRSAPKCS1SignedDigestNSS(signedDigest,
+                                                        subjectPublicKeyInfo,
+                                                        nullptr);
   }
 
   mozilla::pkix::Result DigestBuf(mozilla::pkix::Input item,
+                                  mozilla::pkix::DigestAlgorithm digestAlg,
                           /*out*/ uint8_t* digestBuf, size_t digestBufLen)
   {
-    return ::mozilla::pkix::DigestBuf(item, digestBuf, digestBufLen);
+    return mozilla::pkix::DigestBufNSS(item, digestAlg, digestBuf,
+                                       digestBufLen);
+  }
+
+  mozilla::pkix::Result CheckSignatureDigestAlgorithm(
+    mozilla::pkix::DigestAlgorithm digestAlg)
+  {
+    return mozilla::pkix::Success;
+  }
+
+  mozilla::pkix::Result CheckRSAPublicKeyModulusSizeInBits(
+    mozilla::pkix::EndEntityOrCA endEntityOrCA, unsigned int modulusSizeInBits)
+  {
+    return mozilla::pkix::Success;
+  }
+
+  mozilla::pkix::Result CheckECDSACurveIsAcceptable(
+    mozilla::pkix::EndEntityOrCA endEntityOrCA,
+    mozilla::pkix::NamedCurve curve)
+  {
+    return mozilla::pkix::Success;
+  }
+
+  mozilla::pkix::Result VerifyECDSASignedDigest(
+    const mozilla::pkix::SignedDigest& signedDigest,
+    mozilla::pkix::Input subjectPublicKeyInfo)
+  {
+    return mozilla::pkix::VerifyECDSASignedDigestNSS(signedDigest,
+                                                     subjectPublicKeyInfo,
+                                                     nullptr);
   }
 
 private:

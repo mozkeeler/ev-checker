@@ -22,7 +22,6 @@
  * limitations under the License.
  */
 
-#include "pkix/bind.h"
 #include "pkixutil.h"
 
 namespace mozilla { namespace pkix {
@@ -42,13 +41,8 @@ BackCert::Init()
   // The scope of |input| and |certificate| are limited to this block so we
   // don't accidentally confuse them for tbsCertificate later.
   {
-    Reader input(der);
     Reader certificate;
-    rv = der::ExpectTagAndGetValue(input, der::SEQUENCE, certificate);
-    if (rv != Success) {
-      return rv;
-    }
-    rv = der::End(input);
+    rv = der::ExpectTagAndGetValueAtEnd(der, der::SEQUENCE, certificate);
     if (rv != Success) {
       return rv;
     }
@@ -85,11 +79,7 @@ BackCert::Init()
   if (rv != Success) {
     return rv;
   }
-  // XXX: Ignored. What are we supposed to check? This seems totally redundant
-  // with Certificate.signatureAlgorithm. Is it important to check that they
-  // are consistent with each other? It doesn't seem to matter!
-  SignatureAlgorithm signature;
-  rv = der::SignatureAlgorithmIdentifier(tbsCertificate, signature);
+  rv = der::ExpectTagAndGetValue(tbsCertificate, der::SEQUENCE, signature);
   if (rv != Success) {
     return rv;
   }
@@ -109,13 +99,6 @@ BackCert::Init()
   if (rv != Success) {
     return rv;
   }
-  // TODO(bug XXXXXXX): We defer parsing/validating subjectPublicKeyInfo to
-  // the point where the public key is needed. For end-entity certificates, we
-  // assume that the caller will extract the public key and use it somehow; if
-  // they don't do that then we'll never know whether the key is invalid. On
-  // the other hand, if the caller never uses the key then in some ways it
-  // doesn't matter. Regardless, we should parse and validate
-  // subjectPublicKeyKeyInfo internally.
   rv = der::ExpectTagAndGetTLV(tbsCertificate, der::SEQUENCE,
                                subjectPublicKeyInfo);
   if (rv != Success) {
@@ -124,48 +107,71 @@ BackCert::Init()
 
   static const uint8_t CSC = der::CONTEXT_SPECIFIC | der::CONSTRUCTED;
 
-  // RFC 5280 says: "These fields MUST only appear if the version is 2 or 3
-  // (Section 4.1.2.1). These fields MUST NOT appear if the version is 1."
-  if (version != der::Version::v1) {
+  // According to RFC 5280, all fields below this line are forbidden for
+  // certificate versions less than v3.  However, for compatibility reasons,
+  // we parse v1/v2 certificates in the same way as v3 certificates.  So if
+  // these fields appear in a v1 certificate, they will be used.
 
-    // Ignore issuerUniqueID if present.
-    if (tbsCertificate.Peek(CSC | 1)) {
-      rv = der::ExpectTagAndSkipValue(tbsCertificate, CSC | 1);
-      if (rv != Success) {
-        return rv;
-      }
-    }
-
-    // Ignore subjectUniqueID if present.
-    if (tbsCertificate.Peek(CSC | 2)) {
-      rv = der::ExpectTagAndSkipValue(tbsCertificate, CSC | 2);
-      if (rv != Success) {
-        return rv;
-      }
-    }
-  }
-
-  // Extensions were added in v3, so only accept extensions in v3 certificates.
-  // v4 certificates are not defined but there are some certificates issued
-  // with v4 that expect v3 decoding. For compatibility reasons we handle them
-  // as v3 certificates.
-  if (version == der::Version::v3 || version == der::Version::v4) {
-    rv = der::OptionalExtensions(tbsCertificate, CSC | 3,
-                                 bind(&BackCert::RememberExtension, this, _1,
-                                      _2, _3));
+  // Ignore issuerUniqueID if present.
+  if (tbsCertificate.Peek(CSC | 1)) {
+    rv = der::ExpectTagAndSkipValue(tbsCertificate, CSC | 1);
     if (rv != Success) {
       return rv;
     }
   }
 
+  // Ignore subjectUniqueID if present.
+  if (tbsCertificate.Peek(CSC | 2)) {
+    rv = der::ExpectTagAndSkipValue(tbsCertificate, CSC | 2);
+    if (rv != Success) {
+      return rv;
+    }
+  }
+
+  rv = der::OptionalExtensions(
+         tbsCertificate, CSC | 3,
+         [this](Reader& extnID, const Input& extnValue, bool critical,
+                /*out*/ bool& understood) {
+           return RememberExtension(extnID, extnValue, critical, understood);
+         });
+  if (rv != Success) {
+    return rv;
+  }
+
+  // The Netscape Certificate Type extension is an obsolete
+  // Netscape-proprietary mechanism that we ignore in favor of the standard
+  // extensions. However, some CAs have issued certificates with the Netscape
+  // Cert Type extension marked critical. Thus, for compatibility reasons, we
+  // "understand" this extension by ignoring it when it is not critical, and
+  // by ensuring that the equivalent standardized extensions are present when
+  // it is marked critical, based on the assumption that the information in
+  // the Netscape Cert Type extension is consistent with the information in
+  // the standard extensions.
+  //
+  // Here is a mapping between the Netscape Cert Type extension and the
+  // standard extensions:
+  //
+  // Netscape Cert Type  |  BasicConstraints.cA  |  Extended Key Usage
+  // --------------------+-----------------------+----------------------
+  // SSL Server          |  false                |  id_kp_serverAuth
+  // SSL Client          |  false                |  id_kp_clientAuth
+  // S/MIME Client       |  false                |  id_kp_emailProtection
+  // Object Signing      |  false                |  id_kp_codeSigning
+  // SSL Server CA       |  true                 |  id_pk_serverAuth
+  // SSL Client CA       |  true                 |  id_kp_clientAuth
+  // S/MIME CA           |  true                 |  id_kp_emailProtection
+  // Object Signing CA   |  true                 |  id_kp_codeSigning
+  if (criticalNetscapeCertificateType.GetLength() > 0 &&
+      (basicConstraints.GetLength() == 0 || extKeyUsage.GetLength() == 0)) {
+    return Result::ERROR_UNKNOWN_CRITICAL_EXTENSION;
+  }
+
   return der::End(tbsCertificate);
 }
 
-// XXX: The second value is of type |const Input&| instead of type |Input| due
-// to limitations in our std::bind polyfill.
 Result
-BackCert::RememberExtension(Reader& extnID, const Input& extnValue,
-                            /*out*/ bool& understood)
+BackCert::RememberExtension(Reader& extnID, Input extnValue,
+                            bool critical, /*out*/ bool& understood)
 {
   understood = false;
 
@@ -205,6 +211,14 @@ BackCert::RememberExtension(Reader& extnID, const Input& extnValue,
   static const uint8_t id_pe_authorityInfoAccess[] = {
     0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x01, 0x01
   };
+  // python DottedOIDToCode.py id-pkix-ocsp-nocheck 1.3.6.1.5.5.7.48.1.5
+  static const uint8_t id_pkix_ocsp_nocheck[] = {
+    0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x01, 0x05
+  };
+  // python DottedOIDToCode.py Netscape-certificate-type 2.16.840.1.113730.1.1
+  static const uint8_t Netscape_certificate_type[] = {
+    0x60, 0x86, 0x48, 0x01, 0x86, 0xf8, 0x42, 0x01, 0x01
+  };
 
   Input* out = nullptr;
 
@@ -215,6 +229,17 @@ BackCert::RememberExtension(Reader& extnID, const Input& extnValue,
   // policyConstraints extensions, but that's OK because (and only because) we
   // ignore the extension.
   Input dummyPolicyConstraints;
+
+  // We don't need to save the contents of this extension if it is present. We
+  // just need to handle its presence (it is essentially ignored right now).
+  Input dummyOCSPNocheck;
+
+  // For compatibility reasons, for some extensions we have to allow empty
+  // extension values. This would normally interfere with our duplicate
+  // extension checking code. However, as long as the extensions we allow to
+  // have empty values are also the ones we implicitly allow duplicates of,
+  // this will work fine.
+  bool emptyValueAllowed = false;
 
   // RFC says "Conforming CAs MUST mark this extension as non-critical" for
   // both authorityKeyIdentifier and subjectKeyIdentifier, and we do not use
@@ -238,12 +263,25 @@ BackCert::RememberExtension(Reader& extnID, const Input& extnValue,
     out = &inhibitAnyPolicy;
   } else if (extnID.MatchRest(id_pe_authorityInfoAccess)) {
     out = &authorityInfoAccess;
+  } else if (extnID.MatchRest(id_pkix_ocsp_nocheck) && critical) {
+    // We need to make sure we don't reject delegated OCSP response signing
+    // certificates that contain the id-pkix-ocsp-nocheck extension marked as
+    // critical when validating OCSP responses. Without this, an application
+    // that implements soft-fail OCSP might ignore a valid Revoked or Unknown
+    // response, and an application that implements hard-fail OCSP might fail
+    // to connect to a server given a valid Good response.
+    out = &dummyOCSPNocheck;
+    // We allow this extension to have an empty value.
+    // See http://comments.gmane.org/gmane.ietf.x509/30947
+    emptyValueAllowed = true;
+  } else if (extnID.MatchRest(Netscape_certificate_type) && critical) {
+    out = &criticalNetscapeCertificateType;
   }
 
   if (out) {
     // Don't allow an empty value for any extension we understand. This way, we
     // can test out->GetLength() != 0 or out->Init() to check for duplicates.
-    if (extnValue.GetLength() == 0) {
+    if (extnValue.GetLength() == 0 && !emptyValueAllowed) {
       return Result::ERROR_EXTENSION_VALUE_INVALID;
     }
     if (out->Init(extnValue) != Success) {

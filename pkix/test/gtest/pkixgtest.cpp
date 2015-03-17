@@ -22,43 +22,23 @@
  * limitations under the License.
  */
 
-#ifndef mozilla_pkix__nssgtest_h
-#define mozilla_pkix__nssgtest_h
+#include "pkixgtest.h"
 
-#include "stdint.h"
-#include "gtest/gtest.h"
-#include "pkix/pkixtypes.h"
-#include "pkixtestutil.h"
-#include "prtime.h"
-#include "seccomon.h"
+#include <ctime>
+
+#include "pkix/Time.h"
 
 namespace mozilla { namespace pkix { namespace test {
 
-inline void
-PORT_FreeArena_false(PLArenaPool* arena)
-{
-  // PL_FreeArenaPool can't be used because it doesn't actually free the
-  // memory, which doesn't work well with memory analysis tools
-  return PORT_FreeArena(arena, PR_FALSE);
-}
+const std::time_t ONE_DAY_IN_SECONDS_AS_TIME_T =
+  static_cast<std::time_t>(Time::ONE_DAY_IN_SECONDS);
 
-typedef ScopedPtr<PLArenaPool, PORT_FreeArena_false> ScopedPLArenaPool;
-
-class NSSTest : public ::testing::Test
-{
-public:
-  static void SetUpTestCase();
-
-protected:
-  NSSTest();
-
-  ScopedPLArenaPool arena;
-  static mozilla::pkix::Time now;
-  static PRTime pr_now;
-  static PRTime pr_oneDayBeforeNow;
-  static PRTime pr_oneDayAfterNow;
-};
+// This assumes that time/time_t are POSIX-compliant in that time() returns
+// the number of seconds since the Unix epoch.
+const std::time_t now(time(nullptr));
+const std::time_t oneDayBeforeNow(time(nullptr) -
+                                  ONE_DAY_IN_SECONDS_AS_TIME_T);
+const std::time_t oneDayAfterNow(time(nullptr) +
+                                 ONE_DAY_IN_SECONDS_AS_TIME_T);
 
 } } } // namespace mozilla::pkix::test
-
-#endif // mozilla_pkix__nssgtest_h

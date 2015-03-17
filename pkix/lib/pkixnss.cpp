@@ -26,22 +26,34 @@
 
 #include <limits>
 
-#include "cert.h"
 #include "cryptohi.h"
 #include "keyhi.h"
 #include "pk11pub.h"
 #include "pkix/pkix.h"
 #include "pkix/ScopedPtr.h"
+#include "pkixutil.h"
 #include "secerr.h"
+#include "sslerr.h"
 
 namespace mozilla { namespace pkix {
 
-typedef ScopedPtr<SECKEYPublicKey, SECKEY_DestroyPublicKey> ScopedSECKeyPublicKey;
+namespace {
 
 Result
-CheckPublicKeySize(Input subjectPublicKeyInfo,
-                   /*out*/ ScopedSECKeyPublicKey& publicKey)
+VerifySignedDigest(const SignedDigest& sd,
+                   Input subjectPublicKeyInfo,
+                   SECOidTag pubKeyAlg,
+                   void* pkcs11PinArg)
 {
+  SECOidTag digestAlg;
+  switch (sd.digestAlgorithm) {
+    case DigestAlgorithm::sha512: digestAlg = SEC_OID_SHA512; break;
+    case DigestAlgorithm::sha384: digestAlg = SEC_OID_SHA384; break;
+    case DigestAlgorithm::sha256: digestAlg = SEC_OID_SHA256; break;
+    case DigestAlgorithm::sha1: digestAlg = SEC_OID_SHA1; break;
+    MOZILLA_PKIX_UNREACHABLE_DEFAULT_ENUM
+  }
+
   SECItem subjectPublicKeyInfoSECItem =
     UnsafeMapInputToSECItem(subjectPublicKeyInfo);
   ScopedPtr<CERTSubjectPublicKeyInfo, SECKEY_DestroySubjectPublicKeyInfo>
@@ -49,116 +61,17 @@ CheckPublicKeySize(Input subjectPublicKeyInfo,
   if (!spki) {
     return MapPRErrorCodeToResult(PR_GetError());
   }
-  publicKey = SECKEY_ExtractPublicKey(spki.get());
-  if (!publicKey) {
+  ScopedPtr<SECKEYPublicKey, SECKEY_DestroyPublicKey>
+    pubKey(SECKEY_ExtractPublicKey(spki.get()));
+  if (!pubKey) {
     return MapPRErrorCodeToResult(PR_GetError());
   }
 
-  static const unsigned int MINIMUM_NON_ECC_BITS = 1024;
-
-  switch (publicKey.get()->keyType) {
-    case ecKey:
-      // TODO(bug 622859): We should check which curve.
-      return Success;
-    case dsaKey: // fall through
-    case rsaKey:
-      // TODO(bug 622859): Enforce a minimum of 2048 bits for EV certs.
-      if (SECKEY_PublicKeyStrengthInBits(publicKey.get()) < MINIMUM_NON_ECC_BITS) {
-        return Result::ERROR_INADEQUATE_KEY_SIZE;
-      }
-      break;
-    case nullKey:
-    case fortezzaKey:
-    case dhKey:
-    case keaKey:
-    case rsaPssKey:
-    case rsaOaepKey:
-    default:
-      return Result::ERROR_UNSUPPORTED_KEYALG;
-  }
-
-  return Success;
-}
-
-Result
-CheckPublicKey(Input subjectPublicKeyInfo)
-{
-  ScopedSECKeyPublicKey unused;
-  return CheckPublicKeySize(subjectPublicKeyInfo, unused);
-}
-
-Result
-VerifySignedData(const SignedDataWithSignature& sd,
-                 Input subjectPublicKeyInfo, void* pkcs11PinArg)
-{
-  SECOidTag pubKeyAlg;
-  SECOidTag digestAlg;
-  switch (sd.algorithm) {
-    case SignatureAlgorithm::ecdsa_with_sha512:
-      pubKeyAlg = SEC_OID_ANSIX962_EC_PUBLIC_KEY;
-      digestAlg = SEC_OID_SHA512;
-      break;
-    case SignatureAlgorithm::ecdsa_with_sha384:
-      pubKeyAlg = SEC_OID_ANSIX962_EC_PUBLIC_KEY;
-      digestAlg = SEC_OID_SHA384;
-      break;
-    case SignatureAlgorithm::ecdsa_with_sha256:
-      pubKeyAlg = SEC_OID_ANSIX962_EC_PUBLIC_KEY;
-      digestAlg = SEC_OID_SHA256;
-      break;
-    case SignatureAlgorithm::ecdsa_with_sha1:
-      pubKeyAlg = SEC_OID_ANSIX962_EC_PUBLIC_KEY;
-      digestAlg = SEC_OID_SHA1;
-      break;
-    case SignatureAlgorithm::rsa_pkcs1_with_sha512:
-      pubKeyAlg = SEC_OID_PKCS1_RSA_ENCRYPTION;
-      digestAlg = SEC_OID_SHA512;
-      break;
-    case SignatureAlgorithm::rsa_pkcs1_with_sha384:
-      pubKeyAlg = SEC_OID_PKCS1_RSA_ENCRYPTION;
-      digestAlg = SEC_OID_SHA384;
-      break;
-    case SignatureAlgorithm::rsa_pkcs1_with_sha256:
-      pubKeyAlg = SEC_OID_PKCS1_RSA_ENCRYPTION;
-      digestAlg = SEC_OID_SHA256;
-      break;
-    case SignatureAlgorithm::rsa_pkcs1_with_sha1:
-      pubKeyAlg = SEC_OID_PKCS1_RSA_ENCRYPTION;
-      digestAlg = SEC_OID_SHA1;
-      break;
-    case SignatureAlgorithm::dsa_with_sha256:
-      pubKeyAlg = SEC_OID_ANSIX9_DSA_SIGNATURE;
-      digestAlg = SEC_OID_SHA256;
-      break;
-    case SignatureAlgorithm::dsa_with_sha1:
-      pubKeyAlg = SEC_OID_ANSIX9_DSA_SIGNATURE;
-      digestAlg = SEC_OID_SHA1;
-      break;
-    default:
-      PR_NOT_REACHED("unknown signature algorithm");
-      return Result::ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED;
-  }
-
-  Result rv;
-  ScopedSECKeyPublicKey pubKey;
-  rv = CheckPublicKeySize(subjectPublicKeyInfo, pubKey);
-  if (rv != Success) {
-    return rv;
-  }
-
-  // The static_cast is safe as long as the length of the data in sd.data can
-  // fit in an int. Right now that length is stored as a uint16_t, so this
-  // works. In the future this may change, hence the assertion.
-  // See also bug 921585.
-  static_assert(sizeof(decltype(sd.data.GetLength())) < sizeof(int),
-                "sd.data.GetLength() must fit in an int");
-  SECItem dataSECItem(UnsafeMapInputToSECItem(sd.data));
+  SECItem digestSECItem(UnsafeMapInputToSECItem(sd.digest));
   SECItem signatureSECItem(UnsafeMapInputToSECItem(sd.signature));
-  SECStatus srv = VFY_VerifyDataDirect(dataSECItem.data,
-                                       static_cast<int>(dataSECItem.len),
-                                       pubKey.get(), &signatureSECItem,
-                                       pubKeyAlg, digestAlg, nullptr,
-                                       pkcs11PinArg);
+  SECStatus srv = VFY_VerifyDigestDirect(&digestSECItem, pubKey.get(),
+                                         &signatureSECItem, pubKeyAlg,
+                                         digestAlg, pkcs11PinArg);
   if (srv != SECSuccess) {
     return MapPRErrorCodeToResult(PR_GetError());
   }
@@ -166,15 +79,45 @@ VerifySignedData(const SignedDataWithSignature& sd,
   return Success;
 }
 
+} // unnamed namespace
+
 Result
-DigestBuf(Input item, /*out*/ uint8_t* digestBuf, size_t digestBufLen)
+VerifyRSAPKCS1SignedDigestNSS(const SignedDigest& sd,
+                              Input subjectPublicKeyInfo,
+                              void* pkcs11PinArg)
 {
-  static_assert(TrustDomain::DIGEST_LENGTH == SHA1_LENGTH,
-                "TrustDomain::DIGEST_LENGTH must be 20 (SHA-1 digest length)");
-  if (digestBufLen != TrustDomain::DIGEST_LENGTH) {
-    PR_NOT_REACHED("invalid hash length");
+  return VerifySignedDigest(sd, subjectPublicKeyInfo,
+                            SEC_OID_PKCS1_RSA_ENCRYPTION, pkcs11PinArg);
+}
+
+Result
+VerifyECDSASignedDigestNSS(const SignedDigest& sd,
+                           Input subjectPublicKeyInfo,
+                           void* pkcs11PinArg)
+{
+  return VerifySignedDigest(sd, subjectPublicKeyInfo,
+                            SEC_OID_ANSIX962_EC_PUBLIC_KEY, pkcs11PinArg);
+}
+
+Result
+DigestBufNSS(Input item,
+             DigestAlgorithm digestAlg,
+             /*out*/ uint8_t* digestBuf,
+             size_t digestBufLen)
+{
+  SECOidTag oid;
+  size_t bits;
+  switch (digestAlg) {
+    case DigestAlgorithm::sha512: oid = SEC_OID_SHA512; bits = 512; break;
+    case DigestAlgorithm::sha384: oid = SEC_OID_SHA384; bits = 384; break;
+    case DigestAlgorithm::sha256: oid = SEC_OID_SHA256; bits = 256; break;
+    case DigestAlgorithm::sha1: oid = SEC_OID_SHA1; bits = 160; break;
+    MOZILLA_PKIX_UNREACHABLE_DEFAULT_ENUM
+  }
+  if (digestBufLen != bits / 8) {
     return Result::FATAL_ERROR_INVALID_ARGS;
   }
+
   SECItem itemSECItem = UnsafeMapInputToSECItem(item);
   if (itemSECItem.len >
         static_cast<decltype(itemSECItem.len)>(
@@ -182,7 +125,7 @@ DigestBuf(Input item, /*out*/ uint8_t* digestBuf, size_t digestBufLen)
     PR_NOT_REACHED("large items should not be possible here");
     return Result::FATAL_ERROR_INVALID_ARGS;
   }
-  SECStatus srv = PK11_HashBuf(SEC_OID_SHA1, digestBuf, itemSECItem.data,
+  SECStatus srv = PK11_HashBuf(oid, digestBuf, itemSECItem.data,
                                static_cast<int32_t>(itemSECItem.len));
   if (srv != SECSuccess) {
     return MapPRErrorCodeToResult(PR_GetError());
@@ -190,65 +133,17 @@ DigestBuf(Input item, /*out*/ uint8_t* digestBuf, size_t digestBufLen)
   return Success;
 }
 
-#define MAP_LIST \
-    MAP(Result::Success, 0) \
-    MAP(Result::ERROR_BAD_DER, SEC_ERROR_BAD_DER) \
-    MAP(Result::ERROR_CA_CERT_INVALID, SEC_ERROR_CA_CERT_INVALID) \
-    MAP(Result::ERROR_BAD_SIGNATURE, SEC_ERROR_BAD_SIGNATURE) \
-    MAP(Result::ERROR_CERT_BAD_ACCESS_LOCATION, SEC_ERROR_CERT_BAD_ACCESS_LOCATION) \
-    MAP(Result::ERROR_CERT_NOT_IN_NAME_SPACE, SEC_ERROR_CERT_NOT_IN_NAME_SPACE) \
-    MAP(Result::ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED, SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED) \
-    MAP(Result::ERROR_CONNECT_REFUSED, PR_CONNECT_REFUSED_ERROR) \
-    MAP(Result::ERROR_EXPIRED_CERTIFICATE, SEC_ERROR_EXPIRED_CERTIFICATE) \
-    MAP(Result::ERROR_EXTENSION_VALUE_INVALID, SEC_ERROR_EXTENSION_VALUE_INVALID) \
-    MAP(Result::ERROR_INADEQUATE_CERT_TYPE, SEC_ERROR_INADEQUATE_CERT_TYPE) \
-    MAP(Result::ERROR_INADEQUATE_KEY_USAGE, SEC_ERROR_INADEQUATE_KEY_USAGE) \
-    MAP(Result::ERROR_INVALID_ALGORITHM, SEC_ERROR_INVALID_ALGORITHM) \
-    MAP(Result::ERROR_INVALID_TIME, SEC_ERROR_INVALID_TIME) \
-    MAP(Result::ERROR_KEY_PINNING_FAILURE, MOZILLA_PKIX_ERROR_KEY_PINNING_FAILURE) \
-    MAP(Result::ERROR_PATH_LEN_CONSTRAINT_INVALID, SEC_ERROR_PATH_LEN_CONSTRAINT_INVALID) \
-    MAP(Result::ERROR_POLICY_VALIDATION_FAILED, SEC_ERROR_POLICY_VALIDATION_FAILED) \
-    MAP(Result::ERROR_REVOKED_CERTIFICATE, SEC_ERROR_REVOKED_CERTIFICATE) \
-    MAP(Result::ERROR_UNKNOWN_CRITICAL_EXTENSION, SEC_ERROR_UNKNOWN_CRITICAL_EXTENSION) \
-    MAP(Result::ERROR_UNKNOWN_ERROR, PR_UNKNOWN_ERROR) \
-    MAP(Result::ERROR_UNKNOWN_ISSUER, SEC_ERROR_UNKNOWN_ISSUER) \
-    MAP(Result::ERROR_UNTRUSTED_CERT, SEC_ERROR_UNTRUSTED_CERT) \
-    MAP(Result::ERROR_UNTRUSTED_ISSUER, SEC_ERROR_UNTRUSTED_ISSUER) \
-    MAP(Result::ERROR_OCSP_BAD_SIGNATURE, SEC_ERROR_OCSP_BAD_SIGNATURE) \
-    MAP(Result::ERROR_OCSP_INVALID_SIGNING_CERT, SEC_ERROR_OCSP_INVALID_SIGNING_CERT) \
-    MAP(Result::ERROR_OCSP_MALFORMED_REQUEST, SEC_ERROR_OCSP_MALFORMED_REQUEST) \
-    MAP(Result::ERROR_OCSP_MALFORMED_RESPONSE, SEC_ERROR_OCSP_MALFORMED_RESPONSE) \
-    MAP(Result::ERROR_OCSP_OLD_RESPONSE, SEC_ERROR_OCSP_OLD_RESPONSE) \
-    MAP(Result::ERROR_OCSP_REQUEST_NEEDS_SIG, SEC_ERROR_OCSP_REQUEST_NEEDS_SIG) \
-    MAP(Result::ERROR_OCSP_RESPONDER_CERT_INVALID, SEC_ERROR_OCSP_RESPONDER_CERT_INVALID) \
-    MAP(Result::ERROR_OCSP_SERVER_ERROR, SEC_ERROR_OCSP_SERVER_ERROR) \
-    MAP(Result::ERROR_OCSP_TRY_SERVER_LATER, SEC_ERROR_OCSP_TRY_SERVER_LATER) \
-    MAP(Result::ERROR_OCSP_UNAUTHORIZED_REQUEST, SEC_ERROR_OCSP_UNAUTHORIZED_REQUEST) \
-    MAP(Result::ERROR_OCSP_UNKNOWN_RESPONSE_STATUS, SEC_ERROR_OCSP_UNKNOWN_RESPONSE_STATUS) \
-    MAP(Result::ERROR_OCSP_UNKNOWN_CERT, SEC_ERROR_OCSP_UNKNOWN_CERT) \
-    MAP(Result::ERROR_OCSP_FUTURE_RESPONSE, SEC_ERROR_OCSP_FUTURE_RESPONSE) \
-    MAP(Result::ERROR_INVALID_KEY, SEC_ERROR_INVALID_KEY) \
-    MAP(Result::ERROR_UNSUPPORTED_KEYALG, SEC_ERROR_UNSUPPORTED_KEYALG) \
-    MAP(Result::ERROR_EXPIRED_ISSUER_CERTIFICATE, SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE) \
-    MAP(Result::ERROR_CA_CERT_USED_AS_END_ENTITY, MOZILLA_PKIX_ERROR_CA_CERT_USED_AS_END_ENTITY) \
-    MAP(Result::ERROR_INADEQUATE_KEY_SIZE, MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE) \
-    MAP(Result::FATAL_ERROR_INVALID_ARGS, SEC_ERROR_INVALID_ARGS) \
-    MAP(Result::FATAL_ERROR_INVALID_STATE, PR_INVALID_STATE_ERROR) \
-    MAP(Result::FATAL_ERROR_LIBRARY_FAILURE, SEC_ERROR_LIBRARY_FAILURE) \
-    MAP(Result::FATAL_ERROR_NO_MEMORY, SEC_ERROR_NO_MEMORY) \
-    /* nothing here */
-
 Result
 MapPRErrorCodeToResult(PRErrorCode error)
 {
   switch (error)
   {
-#define MAP(mozilla_pkix_result, nss_result) \
-    case nss_result: return mozilla_pkix_result;
+#define MOZILLA_PKIX_MAP(mozilla_pkix_result, value, nss_result) \
+    case nss_result: return Result::mozilla_pkix_result;
 
-    MAP_LIST
+    MOZILLA_PKIX_MAP_LIST
 
-#undef MAP
+#undef MOZILLA_PKIX_MAP
 
     default:
       return Result::ERROR_UNKNOWN_ERROR;
@@ -260,41 +155,23 @@ MapResultToPRErrorCode(Result result)
 {
   switch (result)
   {
-#define MAP(mozilla_pkix_result, nss_result) \
-    case mozilla_pkix_result: return nss_result;
+#define MOZILLA_PKIX_MAP(mozilla_pkix_result, value, nss_result) \
+    case Result::mozilla_pkix_result: return nss_result;
 
-    MAP_LIST
+    MOZILLA_PKIX_MAP_LIST
 
-#undef MAP
+#undef MOZILLA_PKIX_MAP
 
-    default:
-      PR_NOT_REACHED("Unknown error code in MapResultToPRErrorCode");
-      return SEC_ERROR_LIBRARY_FAILURE;
-  }
-}
-
-const char*
-MapResultToName(Result result)
-{
-  switch (result)
-  {
-#define MAP(mozilla_pkix_result, nss_result) \
-    case mozilla_pkix_result: return #mozilla_pkix_result;
-
-    MAP_LIST
-
-#undef MAP
-
-    default:
-      PR_NOT_REACHED("Unknown error code in MapResultToName");
-      return nullptr;
+    MOZILLA_PKIX_UNREACHABLE_DEFAULT_ENUM
   }
 }
 
 void
 RegisterErrorTable()
 {
-  static const struct PRErrorMessage ErrorTableText[] = {
+  // Note that these error strings are not localizable.
+  // When these strings change, update the localization information too.
+  static const PRErrorMessage ErrorTableText[] = {
     { "MOZILLA_PKIX_ERROR_KEY_PINNING_FAILURE",
       "The server uses key pinning (HPKP) but no trusted certificate chain "
       "could be constructed that matches the pinset. Key pinning violations "
@@ -305,10 +182,26 @@ RegisterErrorTable()
       "certificate, this should not be the case." },
     { "MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE",
       "The server presented a certificate with a key size that is too small "
-      "to establish a secure connection." }
+      "to establish a secure connection." },
+    { "MOZILLA_PKIX_ERROR_V1_CERT_USED_AS_CA",
+      "An X.509 version 1 certificate that is not a trust anchor was used to "
+      "issue the server's certificate. X.509 version 1 certificates are "
+      "deprecated and should not be used to sign other certificates." },
+    { "MOZILLA_PKIX_ERROR_NO_RFC822NAME_MATCH",
+      "The certificate is not valid for the given email address." },
+    { "MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE",
+      "The server presented a certificate that is not yet valid." },
+    { "MOZILLA_PKIX_ERROR_NOT_YET_VALID_ISSUER_CERTIFICATE",
+      "A certificate that is not yet valid was used to issue the server's "
+      "certificate." },
+    { "MOZILLA_PKIX_ERROR_SIGNATURE_ALGORITHM_MISMATCH",
+      "The signature algorithm in the signature field of the certificate does "
+      "not match the algorithm in its signatureAlgorithm field." },
   };
+  // Note that these error strings are not localizable.
+  // When these strings change, update the localization information too.
 
-  static const struct PRErrorTable ErrorTable = {
+  static const PRErrorTable ErrorTable = {
     ErrorTableText,
     "pkixerrors",
     ERROR_BASE,

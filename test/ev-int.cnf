@@ -38,7 +38,7 @@ CN = EV Test Intermediate
 [ v3_int ]
 basicConstraints = critical,CA:true
 keyUsage = critical,cRLSign,keyCertSign
-authorityInfoAccess = OCSP;URI:http://ev-test.mozilla.example.com/
+authorityInfoAccess = OCSP;URI:http://ev-test.mozilla.example.com:8081/
 certificatePolicies=@v3_req_ev_cp
 
 [ v3_req_ev_cp ]

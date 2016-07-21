@@ -57,7 +57,7 @@ CN = ev-test.mozilla.example.com
 # Extensions to add to a certificate request
 basicConstraints = CA:FALSE
 keyUsage = digitalSignature, keyEncipherment
-authorityInfoAccess = OCSP;URI:http://ev-test.mozilla.example.com/
+authorityInfoAccess = OCSP;URI:http://ev-test.mozilla.example.com:8080/
 certificatePolicies=@v3_req_ev_cp
 
 [ v3_req_ev_cp ]

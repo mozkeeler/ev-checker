@@ -31,7 +31,7 @@ function downloadCerts(host, port, continuation) {
 function runChecker(host, port, rootPEM, oid, description, continuation) {
   var command = "echo '\n" + rootPEM + "' >> /tmp/certs.pem && " +
                 "./ev-checker -c /tmp/certs.pem -o " + oid + " -d '" +
-                description + "'";
+                description + "' -h " + host;
   log("runChecker: attempting command '" + command + "'");
   exec(command, continuation);
 }

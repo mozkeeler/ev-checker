@@ -22,6 +22,7 @@ PrintUsage(const char* argv0)
 {
   std::cerr << "Usage: " << argv0 << " <-c certificate list file (PEM format)>";
   std::cerr << " <-o dotted EV policy OID> <-d EV policy description>";
+  std::cerr << " <-h hostname>";
   std::cerr << std::endl << std::endl;
   std::cerr << "(the certificate list is expected to have the end-entity ";
   std::cerr << "certificate first, followed by one or more intermediates, ";
@@ -189,7 +190,8 @@ int main(int argc, char* argv[]) {
   const char* certsFileName = nullptr;
   const char* dottedOID = nullptr;
   const char* oidDescription = nullptr;
-  ScopedPLOptState opt(PL_CreateOptState(argc, argv, "c:o:d:"));
+  const char* hostname = nullptr;
+  ScopedPLOptState opt(PL_CreateOptState(argc, argv, "c:o:d:h:"));
   PLOptStatus os;
   while ((os = PL_GetNextOpt(opt.get())) != PL_OPT_EOL) {
     if (os == PL_OPT_BAD) {
@@ -205,12 +207,15 @@ int main(int argc, char* argv[]) {
       case 'd':
         oidDescription = opt->value;
         break;
+      case 'h':
+        hostname = opt->value;
+        break;
       default:
         PrintUsage(argv[0]);
         return 1;
     }
   }
-  if (!certsFileName || !dottedOID || !oidDescription) {
+  if (!certsFileName || !dottedOID || !oidDescription || !hostname) {
     PrintUsage(argv[0]);
     return 1;
   }
@@ -268,6 +273,31 @@ int main(int argc, char* argv[]) {
     } else if (rv == mozilla::pkix::Result::ERROR_CERT_BAD_ACCESS_LOCATION) {
       std::cerr << "It appears to be the case that a certificate in the ";
       std::cerr << "issuance chain has a malformed or missing OCSP AIA URI";
+      std::cerr << std::endl;
+    }
+    return 1;
+  }
+
+  mozilla::pkix::Input hostnameInput;
+  rv = hostnameInput.Init(reinterpret_cast<const uint8_t*>(hostname),
+                          strlen(hostname));
+  if (rv != mozilla::pkix::Success) {
+    PrintPRError("Couldn't initialize Input from hostname");
+    return 1;
+  }
+  rv = CheckCertHostname(eeInput, hostnameInput);
+  if (rv != mozilla::pkix::Success) {
+    PR_SetError(mozilla::pkix::MapResultToPRErrorCode(rv), 0);
+    PrintPRError("CheckCertHostname failed");
+    PrintPRErrorString();
+    if (rv == mozilla::pkix::Result::ERROR_BAD_CERT_DOMAIN) {
+      std::cerr << "It appears that the end-entity certificate is not valid ";
+      std::cerr << "for the domain it is hosted at.";
+      std::cerr << std::endl;
+    } else if (rv == mozilla::pkix::Result::ERROR_BAD_DER) {
+      std::cerr << "It appears that the name information in the end-entity ";
+      std::cerr << "certificate does not conform to RFC 822, RFC 5280, or ";
+      std::cerr << "RFC 6125.";
       std::cerr << std::endl;
     }
     return 1;

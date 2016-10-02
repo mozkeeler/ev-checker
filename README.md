@@ -40,6 +40,24 @@ succeeds, the EV policy is ready to be enabled. If not, something needs to be
 fixed. Hopefully `ev-checker` emitted a helpful error message pointing to the
 problem.
 
+```bash
+$ ev-checker -c chain.pem -o 2.16.840.1.114412.2.1 -d "Digicert EV OID" -h addons.mozilla.org
+
+// CN=DigiCert High Assurance EV Root CA,OU=www.digicert.com,O=DigiCert Inc,C=US
+"2.16.840.1.114412.2.1",
+"Digicert EV OID",
+SEC_OID_UNKNOWN,
+{ 0xFD, 0xC8, 0x98, 0x6C, 0xFA, 0xC4, 0xF3, 0x5F, 0x1A, 0xCD, 0x51, 
+  0x7E, 0x0F, 0x61, 0xB8, 0x79, 0x88, 0x2A, 0xE0, 0x76, 0xE2, 0xBA, 
+  0x80, 0xB7, 0x7B, 0xD3, 0xF0, 0xFE, 0x5C, 0xEF, 0x88, 0x62 },
+"MGwxCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsT"
+"EHd3dy5kaWdpY2VydC5jb20xKzApBgNVBAMTIkRpZ2lDZXJ0IEhpZ2ggQXNzdXJh"
+"bmNlIEVWIFJvb3QgQ0E=",
+"ApcHVgzUqeu/4nLx4JbYgg==",
+BuildCertChain failed: SEC_ERROR_UNKNOWN_ISSUER
+Peer's Certificate issuer is not recognized.
+```
+
 ## TODO Items ##
 * Do OCSP fetching
 * Other policy issues

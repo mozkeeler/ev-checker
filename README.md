@@ -34,11 +34,11 @@ for the given EV policy. Any certificates in between are intermediate
 certificates.
 
 `ev-checker` will output a blob of text that must be added to
-`ExtendedVerification.cpp` in the mozilla-central tree for Firefox to consider
-this a valid EV policy. It will also validate the end-entity certificate. If it
-succeeds, the EV policy is ready to be enabled. If not, something needs to be
-fixed. Hopefully `ev-checker` emitted a helpful error message pointing to the
-problem.
+[security/certverifier/ExtendedValidation.cpp](https://dxr.mozilla.org/mozilla-central/source/security/certverifier/ExtendedValidation.cpp)
+in the mozilla-central tree for Firefox to consider this a valid EV policy.
+It will also validate the end-entity certificate. If it succeeds, the EV policy
+is ready to be enabled. If not, something needs to be fixed.
+Hopefully `ev-checker` emitted a helpful error message pointing to the problem.
 
 ```bash
 $ ev-checker -c chain.pem -o 2.16.840.1.114412.2.1 -d "Digicert EV OID" -h addons.mozilla.org

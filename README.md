@@ -34,11 +34,28 @@ for the given EV policy. Any certificates in between are intermediate
 certificates.
 
 `ev-checker` will output a blob of text that must be added to
-`ExtendedVerification.cpp` in the mozilla-central tree for Firefox to consider
-this a valid EV policy. It will also validate the end-entity certificate. If it
-succeeds, the EV policy is ready to be enabled. If not, something needs to be
-fixed. Hopefully `ev-checker` emitted a helpful error message pointing to the
-problem.
+[security/certverifier/ExtendedValidation.cpp](https://dxr.mozilla.org/mozilla-central/source/security/certverifier/ExtendedValidation.cpp)
+in the mozilla-central tree for Firefox to consider this a valid EV policy.
+It will also validate the end-entity certificate. If it succeeds, the EV policy
+is ready to be enabled. If not, something needs to be fixed.
+Hopefully `ev-checker` emitted a helpful error message pointing to the problem.
+
+```bash
+$ ev-checker -c chain.pem -o 2.16.840.1.114412.2.1 -d "Digicert EV OID" -h addons.mozilla.org
+
+// CN=DigiCert High Assurance EV Root CA,OU=www.digicert.com,O=DigiCert Inc,C=US
+"2.16.840.1.114412.2.1",
+"Digicert EV OID",
+SEC_OID_UNKNOWN,
+{ 0x74, 0x31, 0xE5, 0xF4, 0xC3, 0xC1, 0xCE, 0x46, 0x90, 0x77, 0x4F,
+  0x0B, 0x61, 0xE0, 0x54, 0x40, 0x88, 0x3B, 0xA9, 0xA0, 0x1E, 0xD0,
+  0x0B, 0xA6, 0xAB, 0xD7, 0x80, 0x6E, 0xD3, 0xB1, 0x18, 0xCF },
+"MGwxCzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsT"
+"EHd3dy5kaWdpY2VydC5jb20xKzApBgNVBAMTIkRpZ2lDZXJ0IEhpZ2ggQXNzdXJh"
+"bmNlIEVWIFJvb3QgQ0E=",
+"AqxcJmoLQJuPC3nyrkYldw==",
+Success!
+```
 
 ## TODO Items ##
 * Do OCSP fetching

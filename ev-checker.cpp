@@ -21,12 +21,17 @@ void
 PrintUsage(const char* argv0)
 {
   std::cerr << "Usage: " << argv0 << " <-c certificate list file (PEM format)>";
-  std::cerr << " <-o dotted EV policy OID> <-d EV policy description>";
-  std::cerr << " <-h hostname>";
+  std::cerr << " <-o dotted EV policy OID> <-h hostname>";
+  std::cerr << " [-d EV policy description]";
   std::cerr << std::endl << std::endl;
   std::cerr << "(the certificate list is expected to have the end-entity ";
   std::cerr << "certificate first, followed by one or more intermediates, ";
   std::cerr << "followed by the root certificate)" << std::endl;
+  std::cerr << "If -d is specified (with an EV policy description), then ";
+  std::cerr << argv0 << " will print out the information necessary to enable ";
+  std::cerr << "the given root for EV treatment in Firefox. Otherwise, ";
+  std::cerr << argv0 << " will simply print out 'Success!' or an error string ";
+  std::cerr << "describing an encountered failure." << std::endl;
 }
 
 inline void
@@ -215,7 +220,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
   }
-  if (!certsFileName || !dottedOID || !oidDescription || !hostname) {
+  if (!certsFileName || !dottedOID || !hostname) {
     PrintUsage(argv[0]);
     return 1;
   }
@@ -230,13 +235,15 @@ int main(int argc, char* argv[]) {
   }
   CERTCertificate* root = CERT_LIST_TAIL(certs.get())->cert;
   CERTCertificate* ee = CERT_LIST_HEAD(certs.get())->cert;
-  std::cout << "// " << root->issuerName << std::endl;
-  std::cout << "\"" << dottedOID << "\"," << std::endl;
-  std::cout << "\"" << oidDescription << "\"," << std::endl;
-  std::cout << "SEC_OID_UNKNOWN," << std::endl;
-  PrintSHA256HashOf(root->derCert);
-  PrintBase64Of(root->derIssuer);
-  PrintBase64Of(root->serialNumber);
+  if (oidDescription) {
+    std::cout << "// " << root->subjectName << std::endl;
+    std::cout << "\"" << dottedOID << "\"," << std::endl;
+    std::cout << "\"" << oidDescription << "\"," << std::endl;
+    std::cout << "SEC_OID_UNKNOWN," << std::endl;
+    PrintSHA256HashOf(root->derCert);
+    PrintBase64Of(root->derIssuer);
+    PrintBase64Of(root->serialNumber);
+  }
   EVCheckerTrustDomain trustDomain(CERT_DupCertificate(root));
   if (trustDomain.Init(dottedOID, oidDescription) != SECSuccess) {
     return 1;

@@ -81,7 +81,7 @@ EVCheckerTrustDomain::Init(const char* dottedEVPolicyOID,
   oidData.oid.len = evOIDItem.len;
   oidData.oid.data = evOIDItem.data;
   oidData.offset = SEC_OID_UNKNOWN;
-  oidData.desc = evPolicyName;
+  oidData.desc = evPolicyName ? evPolicyName : "Test EV Policy OID";
   oidData.mechanism = CKM_INVALID_MECHANISM;
   oidData.supportedExtension = INVALID_CERT_EXTENSION;
   mEVPolicyOIDTag = SECOID_AddEntry(&oidData);

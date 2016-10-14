@@ -23,9 +23,9 @@ First, compile with `make`. There is no guarantee of portability, so feel free
 to file issues if this does not work as expected.
 
 Then, given the file `cert-chain.pem`, the dotted OID of the EV policy, and a
-description of the policy, run `ev-checker` like so:
+hostname to validate against, run `ev-checker` like so:
 
-`./ev-checker -c cert-chain.pem -r ca.pem -o dotted.OID -d "OID description"`
+`./ev-checker -c cert-chain.pem -o dotted.OID -h hostname`
 
 `-c` specifies the file containing a sequence of PEM-encoded certificates. The
 first certificate is the end-entity certificate intended to be tested for EV
@@ -33,7 +33,8 @@ treatment. The last certificate is the root certificate that is authoritative
 for the given EV policy. Any certificates in between are intermediate
 certificates.
 
-`ev-checker` will output a blob of text that must be added to
+If run with the flag `-d` and a description of the EV OID, `ev-checker` will
+output a blob of text that must be added to
 [security/certverifier/ExtendedValidation.cpp](https://dxr.mozilla.org/mozilla-central/source/security/certverifier/ExtendedValidation.cpp)
 in the mozilla-central tree for Firefox to consider this a valid EV policy.
 It will also validate the end-entity certificate. If it succeeds, the EV policy

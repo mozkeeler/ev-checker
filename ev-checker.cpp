@@ -239,7 +239,6 @@ int main(int argc, char* argv[]) {
     std::cout << "// " << root->subjectName << std::endl;
     std::cout << "\"" << dottedOID << "\"," << std::endl;
     std::cout << "\"" << oidDescription << "\"," << std::endl;
-    std::cout << "SEC_OID_UNKNOWN," << std::endl;
     PrintSHA256HashOf(root->derCert);
     PrintBase64Of(root->derIssuer);
     PrintBase64Of(root->serialNumber);

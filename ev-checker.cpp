@@ -46,6 +46,9 @@ CERTCertificate*
 DecodeBase64Cert(const std::string& base64)
 {
   size_t derLen = (base64.length() * 3) / 4;
+  if (base64.length() < 2) {
+    return nullptr;
+  }
   if (base64[base64.length() - 1] == '=') {
     derLen--;
   }

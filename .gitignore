@@ -1,8 +1,0 @@
-.*.sw?
-*.o
-ev-checker
-test/*.pem
-test/*.key
-test/*.req
-test/run-tests.sh
-node_modules/

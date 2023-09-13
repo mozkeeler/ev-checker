@@ -1,3 +1,3 @@
 # ev-checker #
 -----
-Deprecated. Use https://tls-observatory.services.mozilla.com/static/ev-checker.html instead.
+Deprecated. Use https://evready-dot-ccadb-231121.uc.r.appspot.com/evready instead.
